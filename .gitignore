@@ -4,6 +4,9 @@
 !/data/raw/
 /data/raw/*
 !/data/raw/manifest.json
+!/data/preview/
+/data/preview/*
+!/data/preview/*.csv
 
 # Generated outputs stay local; curated results can be added deliberately later.
 /results/*
