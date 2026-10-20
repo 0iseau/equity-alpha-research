@@ -1,0 +1,64 @@
+{
+  "organised_on": "2026-10-15",
+  "source": "WRDS exports collected at CEDIF by the user",
+  "operation": "Moved and renamed existing CSV files; no parsing, rewriting, cleaning or content transformation.",
+  "naming_basis": "CSV headers; date coverage has not been audited, so filenames do not assert date ranges.",
+  "files": [
+    {
+      "filename": "crsp_ciz_monthly_market_indexes.csv",
+      "dataset": "CRSP CIZ monthly stock market indexes",
+      "original_filename": "bitefo13lsxeoq2x.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\bitefo13lsxeoq2x.csv\\bitefo13lsxeoq2x.csv",
+      "bytes": 150917,
+      "original_last_write_time_utc": "2026-10-14T05:13:10.0000000Z"
+    },
+    {
+      "filename": "crsp_ciz_security_history.csv",
+      "dataset": "CRSP CIZ Names / historical security information",
+      "original_filename": "lizvbptrlvga0wfc.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\lizvbptrlvga0wfc.csv\\lizvbptrlvga0wfc.csv",
+      "bytes": 26876522,
+      "original_last_write_time_utc": "2026-10-14T05:10:52.0000000Z"
+    },
+    {
+      "filename": "ccm_fundamentals_annual.csv",
+      "dataset": "CRSP/Compustat Merged annual fundamentals with CRSP identifiers",
+      "original_filename": "swnscsskdbybzzkj.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\swnscsskdbybzzkj_csv\\swnscsskdbybzzkj.csv",
+      "bytes": 86090687,
+      "original_last_write_time_utc": "2026-10-14T05:27:30.0000000Z"
+    },
+    {
+      "filename": "crsp_ciz_monthly_stock.csv",
+      "dataset": "CRSP CIZ monthly stock export including distribution fields",
+      "original_filename": "uyxbk65ma76hbafn.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\uyxbk65ma76hbafn_csv\\uyxbk65ma76hbafn.csv",
+      "bytes": 1709442496,
+      "original_last_write_time_utc": "2026-10-14T05:06:52.0000000Z"
+    },
+    {
+      "filename": "crsp_ciz_daily_stock.csv",
+      "dataset": "CRSP CIZ daily stock export",
+      "original_filename": "wd9husslgxsav8w8.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\wd9husslgxsav8w8_csv\\wd9husslgxsav8w8.csv",
+      "bytes": 21926505988,
+      "original_last_write_time_utc": "2026-10-14T05:33:40.0000000Z"
+    },
+    {
+      "filename": "ccm_link_history.csv",
+      "dataset": "CRSP/Compustat Merged historical links",
+      "original_filename": "xoharrvvelpiofta.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\xoharrvvelpiofta_csv\\xoharrvvelpiofta.csv",
+      "bytes": 8330035,
+      "original_last_write_time_utc": "2026-10-14T05:29:44.0000000Z"
+    },
+    {
+      "filename": "crsp_ciz_delistings.csv",
+      "dataset": "CRSP CIZ delisting events",
+      "original_filename": "yggqfemoziobnbob.csv",
+      "original_workspace_relative_path": "raw_data_from_CEDIF\\yggqfemoziobnbob.csv\\yggqfemoziobnbob.csv",
+      "bytes": 3566230,
+      "original_last_write_time_utc": "2026-10-14T05:12:10.0000000Z"
+    }
+  ]
+}

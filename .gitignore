@@ -1,6 +1,9 @@
 # Course data stays local.
 /data/*
 !/data/README.md
+!/data/raw/
+/data/raw/*
+!/data/raw/manifest.json
 
 # Generated outputs stay local; curated results can be added deliberately later.
 /results/*
