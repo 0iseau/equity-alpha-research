@@ -4,6 +4,16 @@
 !/data/raw/
 /data/raw/*
 !/data/raw/manifest.json
+!/data/raw/fred/
+/data/raw/fred/*
+!/data/raw/fred/README.md
+!/data/raw/fred/manifest.json
+!/data/raw/fred/VIXCLS_latest.csv
+!/data/raw/fred/T10Y3M_latest.csv
+!/data/raw/fred/UNRATE_latest.csv
+!/data/raw/fred/INDPRO_latest.csv
+!/data/raw/fred/CPIAUCSL_latest.csv
+!/data/raw/fred/NFCI_latest.csv
 !/data/preview/
 /data/preview/*
 !/data/preview/*.csv

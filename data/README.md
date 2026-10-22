@@ -1,6 +1,8 @@
 # Data
 
-Raw CSV files stay local in `raw/`. The dataset inventory is tracked in `raw/manifest.json`.
+Private WRDS CSV files stay local in `raw/`. Their inventory is tracked in `raw/manifest.json`.
+Six public FRED CSV snapshots and their source inventory are tracked in `raw/fred/`.
+BAA10Y stays local because its Moody's notice restricts redistribution without written consent.
 
 `preview/` contains only the column names of each raw CSV. No data rows are included.
 
@@ -8,7 +10,10 @@ Raw CSV files stay local in `raw/`. The dataset inventory is tracked in `raw/man
 
 Run `python src/download_public_data.py`. Python's standard library is sufficient;
 no FRED API key is required. Downloads stay local under `raw/public/`, in a new
-timestamped folder for each run. The main project README stays brief.
+timestamped folder for each run. Selected current-history CSVs from the verified
+2026-10-22 collection are also published, unchanged, in `raw/fred/`. Sources,
+citations, hashes and actual retrieval times are in that folder. The complete
+ALFRED archives remain local and can be downloaded again with the script.
 
 The default observation **and vintage** cutoff is **2025-12-31**, matching the end
 of the local CRSP monthly market-index extract (1926-2025). This is a collection
