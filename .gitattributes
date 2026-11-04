@@ -1,8 +1,0 @@
-# Keep text files consistent across Windows and other platforms.
-* text=auto
-*.md text eol=lf
-.gitignore text eol=lf
-.gitattributes text eol=lf
-
-# Preserve the exact downloaded bytes used by the public data hashes.
-/data/raw/fred/*_latest.csv -text
