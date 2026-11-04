@@ -1,7 +1,7 @@
 """Download native FRED histories and ALFRED revision records (standard library only).
 
-Run from anywhere: python src/download_public_data.py
-See data/README.md for selection, timing rules, and limitations.
+Run from the project root: python scripts/download_public_data.py
+See README.md and the collection manifests for provenance and limitations.
 This collects data only; it does not construct signals or fit a model.
 """
 
@@ -143,12 +143,20 @@ def fetch(url: str, fields=None) -> tuple[bytes, dict]:
     raise RuntimeError("Unreachable")
 
 
+def complete_rows(reader):
+    """Reject surplus/absent cells; an explicitly empty cell remains valid missing data."""
+    for row in reader:
+        if None in row or any(value is None for value in row.values()):
+            raise ValueError(f'Malformed CSV row {reader.line_num}: field count differs from header')
+        yield row
+
+
 def latest_stats(body: bytes, sid: str, start: str, end: str) -> dict:
     reader = csv.DictReader(io.StringIO(body.decode("utf-8-sig")))
     if reader.fieldnames != ["observation_date", sid]:
         raise ValueError(f"Unexpected FRED CSV header: {reader.fieldnames}")
     observed, valid, missing, previous = [], [], 0, ""
-    for row in reader:
+    for row in complete_rows(reader):
         d = row["observation_date"]
         iso(d)
         if not start <= d <= end or d <= previous:
@@ -183,7 +191,7 @@ def archive_stats(body: bytes, sid: str, start: str, end: str, vintages: list[st
             reader = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig"))
             if reader.fieldnames != ["period_start_date", sid, "realtime_start_date", "realtime_end_date"]:
                 raise ValueError(f"Unexpected ALFRED CSV header: {reader.fieldnames}")
-            for row in reader:
+            for row in complete_rows(reader):
                 obs, rt_start, rt_end = row["period_start_date"], row["realtime_start_date"], row["realtime_end_date"]
                 iso(obs)
                 iso(rt_start)
@@ -238,7 +246,7 @@ def snapshot_stats(body: bytes, sid: str, vintages: list[str], start: str, end: 
     last_valid = dict.fromkeys(columns)
     quarantined = []
     previous = ""
-    for row in reader:
+    for row in complete_rows(reader):
         obs = row["observation_date"]
         iso(obs)
         if not start <= obs <= end or obs <= previous:
