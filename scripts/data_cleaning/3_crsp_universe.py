@@ -1,4 +1,5 @@
-"""Step 3 of CleaningSpec.md: security information and eligible universe.
+"""
+Step 3 of CleaningSpec.md: security information and eligible universe.
 
 Reference code (Resources/reference_code/):
 - JKP jkp-data, aux_functions.py:
@@ -31,7 +32,8 @@ import re
 
 import polars as pl
 
-from utils import PROCESSED, PROJECT, RAW, CheckError, check, publish, read_verified, sha256
+from utils import (PROCESSED, PROJECT, RAW, CheckError, adj_trd_vol_nasdaq, check, publish,
+                   read_verified, sha256)
 
 SEC = RAW / "crsp_ciz_security_history.csv"
 INDEX = RAW / "crsp_ciz_monthly_market_indexes.csv"
@@ -95,20 +97,6 @@ def parse_siccodes(path) -> pl.DataFrame:
     # One industry per SIC code.
     check(mapping["sic"].is_unique().all(), "A SIC code maps to two FF49 industries")
     return mapping
-
-
-def adj_trd_vol_nasdaq(datevar: str, col_to_adjust: str, is_nasdaq_expr: pl.Expr) -> pl.Expr:
-    """JKP adj_trd_vol_NASDAQ, copied: Gao-Ritter NASDAQ volume adjustment."""
-    c1 = is_nasdaq_expr
-    c2 = pl.col(datevar) < pl.date(2001, 2, 1)
-    c3 = pl.col(datevar) <= pl.date(2001, 12, 31)
-    c4 = pl.col(datevar) <= pl.date(2003, 12, 31)
-    return (
-        pl.when(c1 & c2).then(pl.col(col_to_adjust) / 2)
-        .when(c1 & c3).then(pl.col(col_to_adjust) / 1.8)
-        .when(c1 & c4).then(pl.col(col_to_adjust) / 1.6)
-        .otherwise(pl.col(col_to_adjust))
-    ).alias(col_to_adjust)
 
 
 def join_security_info(panel: pl.DataFrame, sec: pl.DataFrame, report: dict) -> pl.DataFrame:
@@ -340,7 +328,7 @@ def checks(df: pl.DataFrame, report: dict) -> None:
 
 
 def main() -> None:
-    report: dict = {"script": "scripts/crsp_universe.py"}
+    report: dict = {"script": "scripts/data_cleaning/3_crsp_universe.py"}
     panel, run_id = read_verified(PANEL, PANEL_REPORT)
     report["inputs"] = {
         PANEL.name: {"from_run": run_id},

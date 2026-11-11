@@ -29,7 +29,7 @@ import zipfile
 
 import polars as pl
 
-from utils import PROCESSED, RAW, CheckError, check, publish, read_verified, sha256
+from utils import PROCESSED, RAW, CheckError, check, publish, read_raw_verified, read_verified
 
 UNIVERSE = PROCESSED / "crsp_universe.parquet"
 UNIVERSE_REPORT = PROCESSED / "crsp_universe_report.json"
@@ -80,9 +80,12 @@ def classify_size(df: pl.DataFrame, cutoffs: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def read_french_breakpoints() -> pl.DataFrame:
+def read_french_breakpoints(report: dict) -> pl.DataFrame:
     # Ken French ME breakpoints: yyyymm, n, then every 5th NYSE percentile ($ millions).
-    with zipfile.ZipFile(FRENCH_BP) as z:
+    # Read the zip only if its bytes match the download manifest.
+    data, digest = read_raw_verified(FRENCH_BP, FRENCH_BP.parent / "manifest.json")
+    report["inputs"][FRENCH_BP.name] = digest
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
         text = z.read("ME_Breakpoints.csv").decode("latin-1")
     rows = [l for l in text.splitlines() if l[:6].isdigit() and "," in l]
     cols = ["yyyymm", "n"] + [f"p{5 * i}" for i in range(1, 21)]
@@ -130,13 +133,14 @@ def checks(df: pl.DataFrame, cutoffs: pl.DataFrame, report: dict) -> None:
     p = df.select("eom", "me", "me_cap").join(cutoffs.select("eom", "nyse_p80"), on="eom", how="left")
     known = pl.col("me").is_not_null() & pl.col("nyse_p80").is_not_null()
     bad_null = p.filter(~known & pl.col("me_cap").is_not_null()).height
-    bad_min = p.filter(known & (pl.col("me_cap") != pl.min_horizontal("me", "nyse_p80"))).height
+    # ne_missing: a null me_cap with both values known also counts as wrong.
+    bad_min = p.filter(known & pl.col("me_cap").ne_missing(pl.min_horizontal("me", "nyse_p80"))).height
     report["me_cap_null_rows"] = p["me_cap"].null_count()
     check(bad_null == 0, f"{bad_null} rows with me_cap but no me or no p80")
     check(bad_min == 0, f"{bad_min} rows with me_cap different from min(me, p80)")
 
     # Independent check against Ken French NYSE breakpoints.
-    ff = read_french_breakpoints()
+    ff = read_french_breakpoints(report)
     check(ff["yyyymm"].is_unique().all(), "Duplicate months in Ken French breakpoints")
     ours = cutoffs.with_columns(
         yyyymm=(pl.col("eom").dt.year() * 100 + pl.col("eom").dt.month()).cast(pl.Int32)
@@ -145,8 +149,10 @@ def checks(df: pl.DataFrame, cutoffs: pl.DataFrame, report: dict) -> None:
     missing = ours.join(ff, on="yyyymm", how="anti").height
     check(missing == 0, f"{missing} sample months missing in Ken French breakpoints")
     cmp = ours.join(ff, on="yyyymm")
-    check(cmp.select(pl.min_horizontal("nyse_p1", "ff_p20", "ff_p50", "ff_p80").min()).item() > 0,
-          "Non-positive breakpoint before taking logs")
+    # Each compared bound must be a finite number above zero (needed for the logs).
+    for c in ["nyse_p20", "nyse_p50", "nyse_p80", "ff_p20", "ff_p50", "ff_p80"]:
+        bad = cmp.filter(~(pl.col(c).is_finite() & (pl.col(c) > 0)).fill_null(False)).height
+        check(bad == 0, f"{bad} months with a missing or non-positive {c}")
     out = {"months": cmp.height}
     for p in ["p20", "p50", "p80"]:
         rel = (pl.col(f"nyse_{p}") / pl.col(f"ff_{p}") - 1).abs()
@@ -161,9 +167,9 @@ def checks(df: pl.DataFrame, cutoffs: pl.DataFrame, report: dict) -> None:
 
 
 def main() -> None:
-    report: dict = {"script": "scripts/crsp_size.py"}
+    report: dict = {"script": "scripts/data_cleaning/4_crsp_size.py"}
     df, run_id = read_verified(UNIVERSE, UNIVERSE_REPORT)
-    report["inputs"] = {UNIVERSE.name: {"from_run": run_id}, FRENCH_BP.name: sha256(FRENCH_BP)}
+    report["inputs"] = {UNIVERSE.name: {"from_run": run_id}}
 
     cutoffs = nyse_size_cutoffs(df)
     df = classify_size(df, cutoffs)

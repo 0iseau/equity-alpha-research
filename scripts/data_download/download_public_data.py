@@ -1,6 +1,6 @@
 """Download native FRED histories and ALFRED revision records (standard library only).
 
-Run from the project root: python scripts/download_public_data.py
+Run from the project root: python scripts/data_download/download_public_data.py
 See README.md and the collection manifests for provenance and limitations.
 This collects data only; it does not construct signals or fit a model.
 """
@@ -27,7 +27,7 @@ from urllib.request import Request, urlopen
 import zipfile
 
 
-PROJECT = Path(__file__).resolve().parents[1]
+PROJECT = Path(__file__).resolve().parents[2]
 DEFAULT_END = "2025-12-31"  # Last month in the local CRSP market-index extract.
 SERIES = {
     "VIXCLS": {

@@ -2,7 +2,7 @@
 
 Files: NYSE size breakpoints, FF3 factors with the risk-free rate, FF5 factors,
 momentum. They are saved unchanged (zip) in data/raw/french/, with a manifest
-(URL, time, SHA-256). Run: python scripts/download_french_data.py
+(URL, time, SHA-256). Run: python scripts/data_download/download_french_data.py
 
 Raw data never changes: if a file already exists with other bytes (a new
 vintage), the script stops before writing anything.
@@ -22,8 +22,9 @@ FILES = [
     "F-F_Research_Data_Factors_CSV.zip",    # Mkt-RF, SMB, HML, RF
     "F-F_Research_Data_5_Factors_2x3_CSV.zip",
     "F-F_Momentum_Factor_CSV.zip",
+    "F-F_Research_Data_Factors_daily_CSV.zip",  # daily Mkt-RF, SMB, HML, RF
 ]
-OUT = Path(__file__).resolve().parents[1] / "data" / "raw" / "french"
+OUT = Path(__file__).resolve().parents[2] / "data" / "raw" / "french"
 MANIFEST = OUT / "manifest.json"
 
 
@@ -39,12 +40,17 @@ def main() -> None:
         with urlopen(req, timeout=120) as r:
             bodies[name] = r.read()
 
-    # 2) Stop if any existing file would change (keep the vintage already used).
+    # 2) Stop if any existing file would change (keep the vintage already used),
+    #    or if an existing file no longer matches its manifest entry.
     for name, body in bodies.items():
         path = OUT / name
         if path.exists() and path.read_bytes() != body:
             raise SystemExit(f"{name}: a new vintage is online. Move the old file to keep "
                              "it, then rerun. Nothing was written.")
+        if path.exists() and name in old \
+                and old[name]["sha256"] != hashlib.sha256(body).hexdigest():
+            raise SystemExit(f"{name}: the file does not match its manifest entry. "
+                             "Nothing was written.")
 
     # 3) Write new files (temp then rename); keep old manifest entries for same bytes.
     manifest = {"source": BASE, "files": {}}

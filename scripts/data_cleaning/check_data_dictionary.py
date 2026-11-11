@@ -1,0 +1,68 @@
+"""Check resources/data_dictionary.csv against the cleaned tables (ProjectWorkflow.md).
+
+The dictionary gives, for every column: meaning, unit, source, availability and
+role(s). This script stops if a column is missing from the dictionary, if the
+dictionary lists a column that does not exist, or if a role is not allowed with
+the column's availability (the no-look-ahead rule for roles).
+
+Availability codes:
+  key       part of the row key
+  t         known at the end of month t (the formation date)
+  interval  valid on the row date, from an effective date interval
+  acc_6m    annual report usable from 6 months after its fiscal year end (step 8)
+  t+1       known only after the holding month: outcomes
+  after_t   can be dated after month t: audit only
+  today     value as of today (header field): never an input at a past date
+
+Run: python scripts/data_cleaning/check_data_dictionary.py
+"""
+
+from __future__ import annotations
+
+import polars as pl
+
+from utils import PROCESSED, PROJECT, CheckError, check
+
+DICTIONARY = PROJECT / "resources" / "data_dictionary.csv"
+AVAILABILITY = {"key", "t", "interval", "acc_6m", "t+1", "after_t", "today"}
+ROLES = {"identifier", "universe", "predictor", "outcome", "benchmark", "execution_cost",
+         "weight", "audit"}
+# Roles that feed a decision at the end of month t.
+DECISION_ROLES = {"universe", "predictor", "execution_cost", "weight"}
+USABLE_AT_T = {"key", "t", "interval", "acc_6m"}
+
+
+def main() -> None:
+    d = pl.read_csv(DICTIONARY, infer_schema=False)
+    check(d.columns == ["table", "column", "meaning", "unit", "source", "availability", "roles"],
+          "Unexpected dictionary header")
+    check(d.null_count().sum_horizontal().item() == 0, "Empty cell in the dictionary")
+    check(d.select("table", "column").is_unique().all(), "A column is listed twice")
+    check(set(d["availability"].unique()) <= AVAILABILITY, "Unknown availability code")
+
+    for row in d.iter_rows(named=True):
+        roles = set(row["roles"].split(";"))
+        name = f"{row['table']}.{row['column']}"
+        check(roles <= ROLES, f"{name}: unknown role in {roles}")
+        # A decision input must be known at the formation date.
+        if roles & DECISION_ROLES:
+            check(row["availability"] in USABLE_AT_T,
+                  f"{name}: role {roles & DECISION_ROLES} with availability {row['availability']}")
+        # An outcome is known only after the holding month, and is nothing else.
+        check((row["availability"] == "t+1") == (roles == {"outcome"}),
+              f"{name}: 't+1' and the role 'outcome' must go together, alone")
+
+    # Every column of every table is in the dictionary, and nothing else.
+    for table in d["table"].unique(maintain_order=True):
+        have = set(pl.read_parquet_schema(PROCESSED / f"{table}.parquet").keys())
+        listed = set(d.filter(pl.col("table") == table)["column"])
+        check(have == listed, f"{table}: not in dictionary {sorted(have - listed)}; "
+                              f"not in table {sorted(listed - have)}")
+    print(f"data dictionary: {d.height} columns in {d['table'].n_unique()} tables, all checks passed.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except CheckError as e:
+        raise SystemExit(f"CHECK FAILED: {e}")
