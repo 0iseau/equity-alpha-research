@@ -1,21 +1,20 @@
 # Equity Alpha Research
 
-Stratégie long only sur actions américaines (Applied Investments, HEC Lausanne).
+Long-only strategy on US stocks (Applied Investments, HEC Lausanne).
 
 ```text
 Project/
-├── ProjectWorkflow.md   # Étapes du projet
-├── CleaningSpec.md      # Spécification du nettoyage des données
+├── ProjectWorkflow.md   # Steps of the project
+├── CleaningSpec.md      # Data cleaning specification
 ├── scripts/
-│   ├── data_download/   # Collecte des données publiques (FRED, Ken French)
-│   └── data_cleaning/   # Nettoyage, une étape par script
-├── resources/           # Tables de référence et dictionnaire de données
-├── audit/               # Paquets d'audit, un par étape
-└── data/                # Données locales, non publiées
+│   ├── data_download/   # Download of public data (FRED, Ken French)
+│   └── data_cleaning/   # Cleaning, one script per step
+├── resources/           # Reference tables and data dictionary
+└── data/                # Local data, not published
 ```
 
-Les données CRSP/Compustat (WRDS) restent locales et ne sont pas publiées.
-Les données FRED/ALFRED se collectent avec :
+CRSP/Compustat data (WRDS) stay local and are not published.
+FRED/ALFRED data are collected with:
 
 ```powershell
 python scripts/data_download/download_public_data.py --end 2025-12-31
