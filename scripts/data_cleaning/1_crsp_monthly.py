@@ -588,7 +588,7 @@ def final_checks(out: pl.DataFrame, report: dict) -> None:
 
 def main() -> None:
     report: dict = {
-        "script": "scripts/crsp_monthly.py",
+        "script": "scripts/data_cleaning/1_crsp_monthly.py",
         "inputs": {p.name: sha256(p) for p in [SRC, DAILY, DELIST, INDEX]},
     }
     dis_cols = read_header()

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import polars as pl
 
-PROJECT = Path(__file__).resolve().parents[1]
+PROJECT = Path(__file__).resolve().parents[2]
 RAW = PROJECT / "data" / "raw"
 PROCESSED = PROJECT / "data" / "processed"
 
@@ -53,6 +53,50 @@ def read_verified(path: Path, report_path: Path) -> tuple[pl.DataFrame, str]:
     check(hashlib.sha256(data).hexdigest() == expected,
           f"{path.name} does not match {report_path.name}: mixed runs?")
     return pl.read_parquet(io.BytesIO(data)), report["run_id"]
+
+
+def read_raw_verified(path: Path, manifest_path: Path) -> tuple[bytes, str]:
+    """
+    Description:
+        Read a downloaded raw file, only if it matches its manifest.
+    Steps:
+        1) Read the bytes once.
+        2) Check their SHA-256 against manifest["files"][name]["sha256"].
+    Output:
+        The bytes that were checked, and their hash.
+    """
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = manifest.get("files", {}).get(path.name)
+    check(entry is not None, f"{path.name} is not listed in {manifest_path.name}")
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    check(digest == entry["sha256"], f"{path.name} does not match {manifest_path.name}")
+    return data, digest
+
+
+def read_raw_sized(path: Path, report: dict) -> bytes:
+    # Read a WRDS file once: its size must match data/raw/manifest.json (which has
+    # no hash for these files); record the hash of the bytes we parse.
+    data = path.read_bytes()
+    manifest = json.loads((RAW / "manifest.json").read_text(encoding="utf-8"))
+    size = {f["filename"]: f["bytes"] for f in manifest["files"]}.get(path.name)
+    check(size == len(data), f"{path.name}: {len(data)} bytes, manifest says {size}")
+    report["inputs"][path.name] = hashlib.sha256(data).hexdigest()
+    return data
+
+
+def adj_trd_vol_nasdaq(datevar: str, col_to_adjust: str, is_nasdaq_expr: pl.Expr) -> pl.Expr:
+    """JKP adj_trd_vol_NASDAQ, copied: Gao-Ritter NASDAQ volume adjustment."""
+    c1 = is_nasdaq_expr
+    c2 = pl.col(datevar) < pl.date(2001, 2, 1)
+    c3 = pl.col(datevar) <= pl.date(2001, 12, 31)
+    c4 = pl.col(datevar) <= pl.date(2003, 12, 31)
+    return (
+        pl.when(c1 & c2).then(pl.col(col_to_adjust) / 2)
+        .when(c1 & c3).then(pl.col(col_to_adjust) / 1.8)
+        .when(c1 & c4).then(pl.col(col_to_adjust) / 1.6)
+        .otherwise(pl.col(col_to_adjust))
+    ).alias(col_to_adjust)
 
 
 def publish(outputs: dict[Path, pl.DataFrame], report: dict, report_path: Path) -> None:
