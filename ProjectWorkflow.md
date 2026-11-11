@@ -19,41 +19,38 @@ Raw data -> Cleaning -> Data disponibility at different dates -> signals -> pred
 
 ## Cleaning
 
-Cleaning includes : 
-- Units identification and differentiation
-- Consistency in dates and missing data
-- Price and return quality : inconsistencies
-- Identities of equities : distinction organisation - security and links
-- Entries, exits and bankruptcies
-- Data horizons : annual, montly, ...
-- Data definition (sense, obs. freq., ...)
-- Distinguish duplicates, separate events, and conflicting values
+Reference: Jensen, Kelly & Pedersen (2023) and Tidy Finance. Details in `CleaningSpec.md`.
+
+Rules for every step:
+- Raw data never changes
+- Missing stays missing (missing != 0)
+- Stop on any problem, no silent fix
+- Each step saves a table and a check report
+
+Steps:
+1. **Monthly stock panel** - one row per stock and month, distributions in a separate table
+2. **Delisting returns** - check the delisting month return is counted, once
+3. **Eligible universe** - common US stocks on NYSE, AMEX, NASDAQ, judged at the formation date
+4. **Size groups** - NYSE breakpoints, keep all sizes (micro-caps removed later only if costs exceed their alpha, rule fixed in advance)
+5. **Excess returns** - return minus risk-free rate
+6. **CRSP-Compustat links** - match each stock to its company accounts, within valid link dates
+7. **Annual accounts** - one row per company and year, USD only, book equity
+8. **Daily data** - monthly summaries: volatility, liquidity, spreads, beta
+9. **Extreme values** - flag, do not delete
 
 ## Data disponibility at different dates
 
-RULE OF DISPONIBLITY
-Attach flags to every data, differenciating their usage and rules.
-- **availabilty rule** - when can we use the info ?
-    - annual accounts : 6m lag
-    - market close 
-    - macro vintage
-    - effective interval
-    - event
-- **role** - How de we use the info ?
-    - identifier
-    - universe (of availables at date t)
-    - predictor ("x")
-    - outcome ("y")
-    - benchmark
-    - execution_cost (bid, ask, ...)
+Rule: a signal formed at the end of month t only uses info known at that date. The return is measured in month t+1.
 
-QUALITY VERIFICATION
-ALl datasets are processed after checking for these problems
-**quality checks** - What needs attention in the info ?
-    - missing (missing value != 0)
-    - duplicate
-    - conflict
-    - ambiguous_link
-    - source (what is used to compute other data)
+When can we use the info?
+- **Market data** - at the end of the month
+- **Annual accounts** - 6 months after fiscal year end, valid up to 18 months
+- **Daily data** - summarised inside month t
+- **Links and stock status** - only within their valid dates
 
-For each value, we assign 1 flag from "availability" and "role" categories, defining their disponibility and usage. We then control the values through every quality check.
+How do we use the info?
+- One data dictionary per table: meaning, unit, source, availability date, role(s)
+- A variable can have several roles (e.g. market cap: universe, signal, weight)
+
+Check:
+- Automatic test: no data used before its availability date
