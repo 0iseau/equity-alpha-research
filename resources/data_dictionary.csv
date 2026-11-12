@@ -4,11 +4,11 @@ crsp_panel_acc,permco,CRSP company id,id,CRSP monthly,key,identifier
 crsp_panel_acc,yyyymm,Month of the row,yyyymm,CRSP monthly,key,identifier
 crsp_panel_acc,date,"Row date: MthCalDt, or the delisting date on an added delisting row",date,"CRSP monthly, delistings",t,identifier
 crsp_panel_acc,eom,Calendar month end (formation date t),date,derived,key,identifier
-crsp_panel_acc,ret,"Total return of month t, delisting return included",decimal,steps 1-2,t,predictor;audit
-crsp_panel_acc,ret_status,"How ret was built, or why it is missing",code,steps 1-2,t,audit
+crsp_panel_acc,ret,"Total return of month t, delisting return included. On a delisting month it can rest on an amount known later (delamtdt after t) or be partial (status crsp_partial_delisting): use as a predictor only on source rows with ret_signal_ok, before any lag, group, index or join to another security",decimal,steps 1-2,t,predictor;audit
+crsp_panel_acc,ret_status,"How ret was built, or why it is missing; crsp_partial_delisting = CRSP flag V, a part of the delisting distributions is unknown",code,steps 1-2,t,audit
 crsp_panel_acc,ret_crsp,CRSP MthRet as delivered,decimal,CRSP monthly,t,audit
 crsp_panel_acc,ret_pre_delist,Return from the last monthly row to the delisting date (added rows),decimal,CRSP daily,t,audit
-crsp_panel_acc,retx,Return without dividends,decimal,CRSP monthly,t,predictor
+crsp_panel_acc,retx,"Return without dividends; same restriction as ret on delisting months: use as a predictor only on source rows with ret_signal_ok, before any lag, group, index or join to another security",decimal,CRSP monthly,t,predictor
 crsp_panel_acc,ret_flag,CRSP MthRetFlg,code,CRSP monthly,t,audit
 crsp_panel_acc,del_flag,CRSP MthDelFlg (N = no delisting in the month),code,CRSP monthly,t,universe;audit
 crsp_panel_acc,prc,Month-end price,USD,CRSP monthly,t,predictor;execution_cost
@@ -17,7 +17,7 @@ crsp_panel_acc,bidask,1 if the price is a bid-ask average,0/1,derived,t,audit
 crsp_panel_acc,prc_date,Date of the price,date,CRSP monthly,t,audit
 crsp_panel_acc,shrout,Shares outstanding,millions,CRSP monthly,t,predictor
 crsp_panel_acc,me,Market equity of the security,USD millions,CRSP monthly,t,universe;predictor;weight
-crsp_panel_acc,me_company,Market equity summed over the securities of the company,USD millions,derived,t,predictor
+crsp_panel_acc,me_company,Market equity summed over the securities of the company; can be partial: require me_company_complete when the whole company is needed,USD millions,derived,t,predictor
 crsp_panel_acc,me_company_complete,True if every security of the company has a market equity,bool,derived,t,audit
 crsp_panel_acc,me_lag1,Market equity one month before,USD millions,derived,t,weight
 crsp_panel_acc,vol,"Monthly share volume, raw",shares,CRSP monthly,t,audit
@@ -35,7 +35,7 @@ crsp_panel_acc,delpaymenttype,Delisting payment type,code,CRSP delistings,t,audi
 crsp_panel_acc,delamtdt,Date of the delisting amount; can be after month t,date,CRSP delistings,after_t,audit
 crsp_panel_acc,delnextdt,Next trading date after delisting; can be after month t,date,CRSP delistings,after_t,audit
 crsp_panel_acc,delist_row_added,True for a delisting-month row added by the pipeline (D9),bool,derived,t,audit
-crsp_panel_acc,ticker,Ticker in the month,text,CRSP monthly,t,identifier
+crsp_panel_acc,ticker,Ticker of the monthly file; not a stable key (added delisting rows repeat the last one): join on permno,text,CRSP monthly,t,identifier
 crsp_panel_acc,hdr_cusip,"Header CUSIP: the latest one, as of today",text,CRSP monthly,today,identifier
 crsp_panel_acc,secinfostartdt,Start of the security-information interval in force,date,CRSP security history,interval,audit
 crsp_panel_acc,sharetype,Share type,code,CRSP security history,interval,universe
@@ -48,15 +48,17 @@ crsp_panel_acc,tradingstatusflg,Trading status,code,CRSP security history,interv
 crsp_panel_acc,shareclass,Share class,code,CRSP security history,interval,audit
 crsp_panel_acc,cusip,Historical CUSIP,text,CRSP security history,interval,identifier
 crsp_panel_acc,sic,SIC code (0 set to missing),code,CRSP security history,interval,predictor
-crsp_panel_acc,naics,NAICS code,code,CRSP security history,interval,audit
+crsp_panel_acc,naics,NAICS code (0 set to missing),code,CRSP security history,interval,audit
 crsp_panel_acc,primaryexch_last_active,Exchange of the last active interval,code,CRSP security history,interval,audit
 crsp_panel_acc,common,Ordinary common share of a corporation,bool,step 3,t,universe
 crsp_panel_acc,exch_main,"Listed and active on NYSE, AMEX or NASDAQ",bool,step 3,t,universe
 crsp_panel_acc,us_inc,Incorporated in the US,bool,step 3,t,universe
 crsp_panel_acc,eligible,Can be bought at the end of month t,bool,step 3,t,universe
 crsp_panel_acc,crsp_nyse,Eligible and on the NYSE (for breakpoints),bool,step 3,t,universe
-crsp_panel_acc,vol_adj,Monthly volume with the NASDAQ adjustment,shares,step 3,t,execution_cost
-crsp_panel_acc,dolvol,Price times adjusted monthly volume,USD,step 3,t,execution_cost
+crsp_panel_acc,ret_signal_ok,"True if the month has no delisting (del_flag = N): the only rows whose ret, retx and ret_exc may feed a signal",bool,step 3,t,universe;audit
+crsp_panel_acc,vol_adj,Monthly volume with the NASDAQ adjustment of the month's exchange; missing if the stock changed side (NASDAQ or not) during the month (use crsp_daily_agg),shares,step 3,t,execution_cost
+crsp_panel_acc,dolvol,Month-end price times vol_adj; missing in exchange-transfer months. For costs prefer dolvol_21d and dolvol_126d of crsp_daily_agg,USD,step 3,t,execution_cost
+crsp_panel_acc,vol_exch_transfer,True if the stock traded on NASDAQ for a part of the month only (months up to 2003-12); vol_adj and dolvol are then missing,bool,step 3,t,execution_cost;audit
 crsp_panel_acc,prc_age_days,Days between the price date and the row date,days,step 3,t,execution_cost
 crsp_panel_acc,zero_volume,True if the month has no volume,bool,step 3,t,execution_cost
 crsp_panel_acc,ff49,Fama-French 49 industry from sic,code,step 3,t,predictor
@@ -65,7 +67,7 @@ crsp_panel_acc,ret_lead1_status,Status of the t+1 return,code,step 3,t+1,outcome
 crsp_panel_acc,size_grp,Size group from NYSE breakpoints of month t,code,step 4,t,universe;predictor
 crsp_panel_acc,me_cap,Market equity capped at the NYSE 80th percentile,USD millions,step 4,t,weight
 crsp_panel_acc,risk_free,Risk-free return of month t,decimal,Ken French,t,benchmark
-crsp_panel_acc,ret_exc,Excess return of month t,decimal,step 5,t,predictor
+crsp_panel_acc,ret_exc,"Excess return of month t; same restriction as ret on delisting months: use as a predictor only on source rows with ret_signal_ok, before any lag, group, index or join to another security",decimal,step 5,t,predictor
 crsp_panel_acc,ret_exc_lead1,Excess return of month t+1 (holding month),decimal,step 5,t+1,outcome
 crsp_panel_acc,gvkey,Compustat firm key valid at the row date,id,step 6,interval,identifier
 crsp_panel_acc,acc_datadate,Fiscal year end of the annual report usable at t,date,step 8,acc_6m,identifier
@@ -76,6 +78,7 @@ crsp_daily_agg,last_date,Last daily date used in month t,date,CRSP daily,t,audit
 crsp_daily_agg,n_days,Daily rows in month t,count,step 9,t,audit
 crsp_daily_agg,n_ret_21d,Daily returns in month t,count,step 9,t,audit
 crsp_daily_agg,n_ret_252d,Daily returns in the 12 months to t,count,step 9,t,audit
+crsp_daily_agg,ret_d1,"CRSP return of the first trading day of month t (market calendar); missing if the stock has no return that day. Known at the end of month t on its own row. Read through the row of month t+1 it is observed AFTER the order of t is submitted: it only values the holding return from the close of that first day, (1 + ret_lead1) / (1 + ret_d1 of t+1) - 1. It must never change a rank, a budget or an order formed at t. It is not a cost or spread measure and not a predictor. A known value does not prove that a trade was possible that day",decimal,step 9,t,audit
 crsp_daily_agg,rvol_21d,"Std of daily excess returns, month t",decimal per day,step 9,t,predictor
 crsp_daily_agg,rvol_252d,"Std of daily excess returns, 12 months to t",decimal per day,step 9,t,predictor
 crsp_daily_agg,beta_252d,"Market beta, 12 months to t",number,step 9,t,predictor
@@ -85,6 +88,7 @@ crsp_daily_agg,n_spread_21d,Days with a valid quote in month t,count,step 9,t,au
 crsp_daily_agg,spread_quoted_21d,"Mean quoted spread over the midpoint, month t",decimal,step 9,t,execution_cost
 crsp_daily_agg,n_spread_hl_21d,Days with a high-low spread in month t,count,step 9,t,audit
 crsp_daily_agg,bidaskhl_21d,"Mean high-low (Corwin-Schultz) spread, month t",decimal,step 9,t,execution_cost
+crsp_daily_agg,n_hl_observed_21d,Days of month t with an observed high-low range accepted by the estimator (0 = the high-low spread rests only on carried ranges),count,step 9,t,execution_cost;audit
 compustat_annual,gvkey,Compustat firm key,id,Compustat,key,identifier
 compustat_annual,datadate,Fiscal year end,date,Compustat,key,identifier
 compustat_annual,fyear,Fiscal year,year,Compustat,acc_6m,identifier

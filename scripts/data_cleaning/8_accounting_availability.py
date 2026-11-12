@@ -62,6 +62,8 @@ def read_report_calendar(report: dict) -> pl.DataFrame:
                 pl.col("curcd"),
                 (pl.col("curcd") == "USD").fill_null(False).alias("usd"))
         .unique()
+        # JKP practice: unique() does not keep the row order, so sort right after it.
+        .sort("gvkey", "datadate")
     )
     check(cal.select("gvkey", "datadate").is_unique().all(), "Duplicate report in the calendar")
     report["report_calendar"] = {"reports": cal.height, "usd": int(cal["usd"].sum())}

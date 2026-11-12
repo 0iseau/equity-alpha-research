@@ -99,6 +99,18 @@ def adj_trd_vol_nasdaq(datevar: str, col_to_adjust: str, is_nasdaq_expr: pl.Expr
     ).alias(col_to_adjust)
 
 
+def file_stamps(paths: list[Path]) -> dict[Path, tuple[int, int]]:
+    # Size and modification time of large raw files that are hashed in one pass and
+    # read in another: taken before the hash, checked again before publishing.
+    return {p: (p.stat().st_size, p.stat().st_mtime_ns) for p in paths}
+
+
+def check_unchanged(stamps: dict[Path, tuple[int, int]]) -> None:
+    for p, old in stamps.items():
+        check((p.stat().st_size, p.stat().st_mtime_ns) == old,
+              f"{p.name} changed while it was being processed")
+
+
 def publish(outputs: dict[Path, pl.DataFrame], report: dict, report_path: Path) -> None:
     """
     Description:

@@ -30,6 +30,9 @@ ROLES = {"identifier", "universe", "predictor", "outcome", "benchmark", "executi
 # Roles that feed a decision at the end of month t.
 DECISION_ROLES = {"universe", "predictor", "execution_cost", "weight"}
 USABLE_AT_T = {"key", "t", "interval", "acc_6m"}
+# The tables the dictionary must describe: a missing table is an error too.
+TABLES = {"crsp_panel_acc", "crsp_daily_agg", "compustat_annual", "ff_factors_monthly",
+          "acc_public", "ccm_links", "nyse_cutoffs"}
 
 
 def main() -> None:
@@ -52,6 +55,8 @@ def main() -> None:
         check((row["availability"] == "t+1") == (roles == {"outcome"}),
               f"{name}: 't+1' and the role 'outcome' must go together, alone")
 
+    check(set(d["table"].unique()) == TABLES,
+          f"Tables in the dictionary: {sorted(set(d['table'].unique()) ^ TABLES)} differ from the expected ones")
     # Every column of every table is in the dictionary, and nothing else.
     for table in d["table"].unique(maintain_order=True):
         have = set(pl.read_parquet_schema(PROCESSED / f"{table}.parquet").keys())

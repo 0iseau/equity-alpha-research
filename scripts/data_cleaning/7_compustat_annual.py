@@ -78,7 +78,8 @@ def read_accounts(report: dict) -> pl.DataFrame:
     check(df.select("GVKEY", "datadate", "LPERMNO").is_unique().all(),
           "Duplicate (GVKEY, datadate, LPERMNO) in the raw file")
     # All other fields must be the same across the copies.
-    df = df.drop("LPERMNO", "LPERMCO").unique()
+    # JKP practice: unique() does not keep the row order, so sort right after it.
+    df = df.drop("LPERMNO", "LPERMCO").unique().sort("GVKEY", "datadate")
     check(df.select("GVKEY", "datadate").is_unique().all(),
           "Rows of one gvkey-datadate differ beyond LPERMNO")
     report["gvkey_datadate_rows"] = df.height
