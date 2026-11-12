@@ -18,8 +18,9 @@ General rule: **JKP for rigour** of the definitions, **TF for simplicity** of th
 implementation, and **the course wins** in case of conflict. Every deviation is
 justified below.
 
-Some items were seen only through a summary of the code, not the exact text.
-They are marked *(to reconfirm)*.
+Results quoted inside a step are those of the date given in that step. When a
+later audit changed a figure, the "Corrections" paragraph of the step and the
+section "Final audit" at the end give the current one.
 
 ## Profile of our raw files (checked on 2026-11-11)
 
@@ -44,8 +45,12 @@ They are marked *(to reconfirm)*.
 - **Time key**: `eom`, the calendar month end. `MthCalDt` is kept as it is.
 - **Cleaned data keep the full history.** The analysis sample (1963-2025) is
   chosen later.
-- **Missing stays missing.** No filling and no imputation, except the delisting
-  returns described in step 2.
+- **Missing stays missing.** No filling and no imputation, with these documented
+  exceptions: the −30 % delisting return of step 2 (D3); the JKP book-equity
+  formula of step 7, where a missing preferred stock or deferred tax counts as
+  zero inside the formula only; the high-low spread of step 9, where JKP carries
+  the last valid range forward. Shares are converted from thousands to millions
+  (`shrout`), market equity from thousands to millions of USD (`me`).
 - **Fail on any anomaly.** An unexpected schema, key or range of values stops
   the script. Unusual values are flagged, not removed.
 
@@ -90,8 +95,12 @@ Astra audit of 2026-11-11. Outputs:
 delisting month: it is the holding return of the position, following the CRSP
 and JKP convention. It can rest on an amount known later (`delamtdt`,
 `delnextdt` are kept), for example 537 of the 547 G cases. The stock leaves the
-universe at its delisting, so this return **feeds no signal**. In the backtest,
-the proceeds are assumed to be reinvested at the end of the delisting month.
+universe at its delisting, so this return cannot reach a signal **through its
+own stock** (checked at step 3 since the final audit). It could still reach one
+through another security (a signal on another share class of the company, or an
+industry aggregate): the mask `ret_signal_ok` must be applied to the source rows
+(see "Counter-audit"). How the backtest funds proceeds that arrive later is an
+open decision (see "Rules proposed before the backtest").
 
 **Deviations justified by our data**:
 - **`me = MthCap / 1000`** instead of `prc × shrout` (JKP). In 180 rows, the last
@@ -159,10 +168,11 @@ the proceeds are assumed to be reinvested at the end of the delisting month.
 
 **Deferred to later steps** (reservations of the counter-review, no effect on
 the panel):
-- **Funding of late delisting proceeds**, reservation on finding 4: in the
-  backtest, the proceeds of a G delisting whose amount is known after the month
-  (`delamtdt > eom`) are reinvested only from `delamtdt`. In between, they are
-  treated as a receivable.
+- **Funding of late delisting proceeds**, reservation on finding 4. The scenario
+  written on 2026-11-11 (proceeds of a G delisting reinvested only from
+  `delamtdt`, a receivable in between) is no longer a rule: it is one of the
+  three scenarios of the open decision B3 (see "Rules proposed before the
+  backtest").
 - **Safe reading**, reservation on finding 10: every script that reads these
   outputs first checks their SHA-256 against `crsp_monthly_report.json`.
 
@@ -779,7 +789,9 @@ model:
 
 The full list below stays the reference if time allows.
 
-- Rows with `DlyDelFlg = 'Y'` are excluded (JKP). The 22 GB file is read once.
+- Rows with `DlyDelFlg = 'Y'` are excluded (JKP). The 22 GB file is hashed in one
+  pass and converted in a second pass (its size and modification time must be
+  the same before and after).
 - Measures by stock and by window-end month, with the **minimum number of
   observations of JKP**:
   - volatility over 21 days (at least 15) and over 252 days (at least 120);
@@ -790,8 +802,11 @@ The full list below stays the reference if time allows.
 - **Spreads**:
   - quoted spread from `DlyBid` and `DlyAsk` when they exist;
   - otherwise the Corwin-Schultz high-low estimator, like JKP (`bidaskhl_21d`,
-    at least 10 days). Days where the price is a bid-ask average
-    (`DlyPrcFlg = 'BA'`) are left out of this computation.
+    at least 11 daily estimates: JKP's threshold is strictly more than 10). On a
+    day where the price is a bid-ask average (`DlyPrcFlg = 'BA'`) or without
+    volume, JKP does not use the day's own range: it carries the last valid
+    range forward. A month can therefore have an estimate without any range
+    observed in the month; `n_hl_observed_21d` counts the observed ranges.
   - The course replaces missing spreads by the mean of the size category; this
     imputation serves **only the cost model**, not the signals.
 
@@ -801,7 +816,8 @@ The full list below stays the reference if time allows.
   million rows);
 - `crsp_daily_agg.parquet`: one row per stock-month (4,891,218), key
   `(permno, yyyymm)`, with `rvol_21d`, `rvol_252d`, `beta_252d`, `dolvol_21d`,
-  `dolvol_126d`, `spread_quoted_21d`, `bidaskhl_21d` and the observation counts;
+  `dolvol_126d`, `spread_quoted_21d`, `bidaskhl_21d`, `n_hl_observed_21d` and
+  the observation counts;
 - `crsp_daily_agg_report.json`.
 
 - **Code reused from JKP**:
@@ -812,8 +828,8 @@ The full list below stays the reference if time allows.
     var(market); `dolvol` = mean of the daily dollar volume;
   - guards: no value if raw returns are near-constant (standard deviation
     ≤ 1e-6) or zero 90 % of the time or more;
-  - `DlyDelFlg = 'Y'` rows excluded; a return after a gap of more than 14 days
-    not used; days without a market return excluded;
+  - `DlyDelFlg = 'Y'` rows excluded; a return whose previous price is more than
+    14 days old is not used; every CRSP day must have a market return;
   - Gao-Ritter NASDAQ volume adjustment (step 3 function).
 - **Deviations**:
   - daily market and risk-free returns from Ken French (JKP builds its own
@@ -829,8 +845,10 @@ The full list below stays the reference if time allows.
 **Check results**:
 - daily file: size equal to the manifest, hash identical to the one of step 1,
   exact header. 102,059,931 rows for 40,058 stocks; 31,620 exact duplicates
-  removed, no conflicting duplicate; 29,362 delisting rows excluded; no gap of
-  more than 14 days; 100 rows without a known exchange (dollar volume missing);
+  removed, no conflicting duplicate; 29,362 delisting rows excluded. (First run:
+  no row gap of more than 14 days and 100 rows without a known exchange; after
+  the step 9 audit, 40 returns dropped and 0 row without an exchange, see the
+  corrections below);
 - **second route**: on 101 stocks, each statistic is recomputed directly on the
   daily rows of each window. Largest relative gap of 1e-13, no difference in
   missing values;
@@ -853,7 +871,9 @@ We therefore reuse the Corwin and Schultz (2012) estimator as JKP codes it
 (`bidask_hl`, `impute_high_low`, `adjust_overnight_returns`,
 `compute_bidask_spread`, copied): spread from the high and low prices of the day
 and of the day before, negative values set to zero, monthly mean over more than
-10 days.
+10 daily estimates (at least 11). Prices are divided by `DlyCumFacShr`, the
+cumulative factor for share splits (not the price factor that also adjusts for
+distributions), as in JKP.
 - coverage by market equity: 99.9 % (1960), 92.7 % (1970), 96.5 % (1980), then
   above 99.8 %. Either of the two spreads: at least 99.9 % in every decade,
   99.2 % of eligible stock-months by count;
@@ -867,7 +887,60 @@ and of the day before, negative values set to zero, monthly mean over more than
   otherwise the high-low one) is a **decision of the cost model**, to fix before
   the backtest.
 
-**Status: implemented, waiting for the Astra audit.**
+**Corrections after the Astra audit of step 9** (2026-11-12, verdict "to
+correct"):
+- **Exchange of the day, blocking finding 1.** The NASDAQ volume adjustment used
+  the exchange of the month end for every day of the month. It now uses the
+  exchange valid on each daily date (security-history interval, bounds
+  included; if the stock is not active there, the last active interval, as in
+  step 3). Reference case checked at every run: PERMNO 62500 in March 2000
+  (NYSE until the 20th, NASDAQ from the 21st) has a mean daily dollar volume of
+  29,143,056, against 17,097,119 before. Astra's count: 1,636 one-month values
+  and 9,824 six-month values change (1,489 and 8,929 eligible). No daily row is
+  left without a known exchange.
+- **14-day rule, blocking finding 2.** The gap was measured from the previous
+  row. Rows without a price can sit between two prices, so a return could cover
+  several weeks. The gap is now measured from the **previous row with a price**.
+  40 returns are dropped (0 before). Reference case checked at every run: PERMNO
+  37022 in December 1978, where a +103 % return after weeks without a price
+  made the daily volatility 23.65 %; it is now 1.05 %. This is a project rule:
+  JKP's CRSP branch does not apply its own 14-day rule. 1,087 returns have no
+  earlier price in the file and are not used, as before.
+- **High-low ranges carried forward, finding 3.** New column
+  `n_hl_observed_21d`: days of the month with an observed range (trade price,
+  volume, high above low). 51,018 stock-months have a high-low spread with no
+  observed range in the month: the estimate rests only on carried ranges. The
+  cost model must not use them as if they were observed (see below).
+- **Market calendar, finding 4.** A CRSP trading day missing from the Ken French
+  calendar now stops the script (it used to drop the day for all measures). The
+  direct check also requires the same stock-months in the output and in the
+  direct computation. Both negative tests are caught.
+- **Cache stamp, finding 5.** Written through a temporary file.
+- All other figures above are unchanged at the precision shown (coverage,
+  medians, correlation with monthly returns, value-weighted beta 1.01).
+
+**Open decision for the cost model** (to fix before the backtest; Astra's
+recommendation, not decided yet):
+1. use the quoted spread when it exists;
+2. otherwise the high-low spread, only if the month has observed ranges
+   (`n_hl_observed_21d > 0`), rescaled by the ratio of the medians "quoted /
+   high-low" of the same size group, estimated on pairs strictly before t
+   (window, minimum count and zero denominator fixed in advance);
+3. otherwise the mean of the size category at the formation date (course rule);
+   with no usable reference, the cost is left undetermined and the weight of the
+   turnover concerned is reported;
+4. cost of a trade = half the relative spread × the absolute amount traded;
+   commissions and price impact are kept apart;
+5. report the net result under this rule and under the simple course fallback.
+On the same stock-months, the medians are (quoted / high-low): mega 0.056 % /
+0.545 %, large 0.114 % / 0.651 %, small 0.333 % / 0.927 %, micro 2.196 % /
+1.657 %, nano 4.703 % / 2.948 %. These full-period ratios must not enter the
+historical estimates. A sensitivity to the 50 % cap of the quoted spread is
+shown if nano-cap costs change the conclusion (the cap removes 563,008 quotes).
+
+**Status: step 9 closed on 2026-11-12** (Astra audit "to correct": the two
+blocking findings and the three others are fixed; the fixes are checked in the
+final audit).
 
 ### Step 10: extreme values
 
@@ -884,7 +957,7 @@ steps.
 ### Data dictionary (`resources/data_dictionary.csv`)
 
 Planned by `ProjectWorkflow.md`. One row per column of the seven cleaned tables
-(144 columns): meaning, unit, source, availability and role(s).
+(148 columns): meaning, unit, source, availability and role(s).
 
 - **Availability**: `key` (row key), `t` (known at the end of month t),
   `interval` (validity interval), `acc_6m` (annual report usable 6 months after
@@ -898,6 +971,9 @@ Planned by `ProjectWorkflow.md`. One row per column of the seven cleaned tables
   - a decision role (`universe`, `predictor`, `execution_cost`, `weight`) needs
     an availability of `key`, `t`, `interval` or `acc_6m`;
   - `t+1` and the role `outcome` always go together, with no other role.
+- Restricted use: `ret` and `ret_exc` are predictors only on rows with
+  `del_flag = N` (see "Final audit"); `me_company` needs `me_company_complete`
+  when the whole company is required; `ticker` is not a key (join on `permno`).
 - Columns never to use as an input: `hdr_cusip` (`today`), `delamtdt` and
   `delnextdt` (`after_t`), and the three `t+1` columns (`ret_lead1`,
   `ret_lead1_status`, `ret_exc_lead1`).
@@ -938,22 +1014,309 @@ show that the conclusion does not depend on it, or we say that it does.
 
 - The backtest shows **two versions** of the strategy, fixed in advance:
   - **version A**: price signals only (momentum, volatility), not exposed to
-    the bias;
+    the bias. Its universe must not depend on the availability of accounts
+    either;
   - **version B**: price signals and accounting signals (value, quality),
     exposed to the bias.
 - Both versions get the same tests (alphas and t-tests on the factor models,
   costs included).
 - Reading of the results:
   - if version A has a significant alpha, the conclusion holds without any
-    accounting signal. The gap between B and A is the contribution of the
-    accounting signals, reported as a **maximum**, because a part of it may come
-    from the bias;
+    accounting signal. The gap between B and A is the **observed gap** between
+    the two strategies (interactions and costs included). It is not a bound on
+    the contribution of the accounting signals: the sign of the effect of
+    restatements is unknown (correction from the step 9 audit);
   - if alpha appears only with version B, the report says that the result rests
     on signals exposed to a bias that cannot be measured.
 - Complements: a test with a lag of 12 months instead of 6 for the accounting
-  signals (late filings), and a verified academic reference on the gap between
+  signals (it explores late filings; it does not restore the values published
+  at the time), and a verified academic reference on the gap between
   restated and as-first-reported data, to find when writing the report.
 - The limit is disclosed in the report, with the Super Micro Computer example.
+
+## Final audit of the cleaning (Astra, 2026-11-12)
+
+Astra audited the whole chain (instructions in
+`audit/AUDIT_FINAL_nettoyage_consignes_pour_Astra.md`, report in
+`Workspace/output/2026-11-12_AUDIT_FINAL_nettoyage_pour_Claude.md`). Verdict:
+"to correct", with one blocking finding. Astra reran the eight scripts and got
+15 data files out of 15 identical; its independent rebuild of HML (2×3 sorts in
+June, 750 months from 1963-07) has a correlation of 0.982 with the Fama-French
+HML and a mean gap of −1.9 basis points a month. All findings are handled:
+
+1. **Monthly adjusted volume (blocking).** Step 3 applied the month-end exchange
+   to the whole monthly volume, while step 9 adjusts each day. Fix: new column
+   `vol_exch_transfer` in the panel. It is true when an active interval of the
+   security history that overlaps the month is on the other side (NASDAQ or not)
+   of the exchange used; `vol_adj` and `dolvol` are then missing: 2,297
+   stock-months, 2,123 eligible since 1963 (Astra counted 1,668 with a real
+   difference; the flag is wider on purpose). New cross-step check in step 9: on
+   2,502,768 months where the daily rows add up to the monthly raw volume, the
+   monthly adjusted volume equals the sum of the daily ones, with 0 difference.
+   For costs, use `dolvol_21d` and `dolvol_126d`.
+2. **Late delisting amounts.** A delisting return can rest on an amount known
+   after the month (`delamtdt > eom`: 4,811 rows). New check in step 3: no stock
+   is eligible again between its delisting month and the date of that amount, so
+   such a return cannot reach a signal through its own stock. The dictionary now
+   limits `ret` and `ret_exc` as predictors to rows with `del_flag = N`. **The
+   earlier sentence "the proceeds are assumed to be reinvested at the end of the
+   delisting month" is withdrawn**: the funding of late proceeds (economic
+   result, receivable, cash available) is a backtest decision, still open.
+3. **Flag V.** CRSP flag V means that a part of the delisting distributions is
+   unknown. The return is kept as delivered (JKP), but its status is now
+   `crsp_partial_delisting` instead of `crsp`: 200 rows (199 since 1963, 166
+   after an eligible formation). Whether such a return counts as known is a
+   backtest decision, still open; their weight will be reported.
+4. **Raw FRED files.** The files restored after the Git incident had Windows
+   line endings and failed their own hashes. They were restored again byte for
+   byte from the Git objects of commit `ed8bc04`: the six CSV files match the
+   hashes of `data/raw/fred/manifest.json`. No cleaned table uses them.
+5. **Hash and read in separate passes.** For the large CSV files, steps 1 and 9
+   now record the size and modification time before hashing and check them again
+   before publishing. Step 3 reads the security history from the bytes it
+   hashes. The temporary files of the daily cache are named with a unique id.
+6. **Spread coverage.** Step 9 also reports the coverage of the spread usable by
+   the cost rule (quoted, or high-low with at least one observed range): 99.1 %
+   of eligible stock-months by count, 99.96 % by market equity.
+7. **Field meanings.** `naics = 0` is set to missing, like `sic = 0`. The
+   dictionary warns on `ticker` and `me_company`.
+8. **Checks that took their population from the object under test.** The
+   dictionary check now requires the seven expected tables. The direct check of
+   step 9 draws its sample from the daily input.
+9. **Stale passages** of this document are dated or replaced.
+10. **Observed ranges.** `n_hl_observed_21d` now counts only the ranges accepted
+    by the estimator (high / low ratio of at most 8).
+
+**Proposal to fix for the spread rule** (Astra, not decided): pairs from the 36
+months before t; at least 100 pairs over 12 distinct months per size group;
+ratio of the two medians; otherwise the mean quoted spread of the size category
+at t; otherwise an undetermined cost with the traded weight reported; the raw
+high-low spread tested apart at the start of the history.
+
+**Before the signals** (Astra, B10), to decide and write down first:
+- delistings and cash: flag V, unknown returns of positions already held, late
+  proceeds;
+- execution and capacity: time and price of the trade (the daily open is not in
+  our export), capital, horizon in days, participation limit, impact
+  coefficients, and what to do with a stale price, no volume or no reliable cost;
+- the spread rule above;
+- signals: industry grouping and an "unknown industry" bucket (94,997 eligible
+  rows have no FF49), minimum coverage, missing-value rules (a missing
+  accounting item is not zero; only 2,030,962 eligible stock-months have book
+  equity, sales, cost of goods sold, SG&A and interest together), 12-month
+  comparisons on the same `gvkey`, market equity of the security or of all
+  share classes for book-to-market, momentum window and skipped month;
+- versions A and B (D12) and the sensitivity tests (D3 at −55 % for NASDAQ,
+  12-month lag, Ken French breakpoints, costs), frozen before any result;
+- the q and q5 factors, needed for the alphas only;
+- Ken French factors are fine for ex post regressions; they are not a signal
+  known in real time.
+
+## What the references do about the problems found (2026-11-12)
+
+After the final audit, the reference code was searched for each problem. Where
+a reference has a solution, our code follows it.
+
+| Problem | In the references | In our code |
+|---|---|---|
+| Output changing from one run to the next | JKP sorts the rows before order-sensitive computations (comments in `capm` and `res_mom`: cov, var and std are "float-order-sensitive") and replaces a non-deterministic `.unique()` by a sort and a keyed dedup. | Explicit sort right after every `.unique()` that feeds a computation (steps 1, 7, 8, 9); sort and `maintain_order=True` before the monthly sums of step 9. The 15 outputs are the same bytes before and after this change. |
+| Return covering more than 14 days | JKP computes `ret_lag_dif` as the days since the previous observation among rows that have a price, and requires `ret_lag_dif <= 14` in `prepare_daily`. Its CRSP branch sets `ret_lag_dif = 1`, so the rule is not applied to CRSP stocks. | Same definition as JKP's Compustat branch (gap since the last row with a price), applied to our CRSP stocks. A stated deviation from JKP's CRSP branch. |
+| Exchange used for the NASDAQ volume | In `gen_crsp_sf`, JKP takes `primaryexch` from the dated stock file itself (the join to the security history adds no column). `prepare_crsp_sf` adjusts the volume only when the exchange is Q and `conditionaltype` is RW. | We rebuild the exchange of each date from the security history, with the last active interval as fallback; we have no `conditionaltype` (D2). Daily: exchange of each day. Monthly: missing in transfer months (our own rule). Coefficients and dates of the adjustment follow JKP. |
+| High-low ranges carried forward | Intended behaviour of `impute_high_low`; JKP does not count observed ranges. | Code copied; `n_hl_observed_21d` added. |
+| Industry code 0 | JKP sets `sic = 0` to missing (`crsp_industry`). | Same, extended to `naics`. |
+| Next return not consecutive | JKP has a condition on the next `ret_lag_dif`, but its CRSP monthly branch sets that field to 1 and its `LEAD` follows the next observed row, even after a missing calendar month. The gap is really computed for Compustat securities only. | Stricter: `ret_lead1` needs the row of the next calendar month (0 case since 1963 where the two definitions differ). |
+| Missing returns inside a portfolio | In its market aggregates JKP drops missing returns and renormalises the weights. | Same in our market checks only. For the strategy portfolio the rule is an open decision. |
+| 12-month changes of accounting items | JKP needs more than 12 months of history (`count > 12`) and compares with the value 12 months before, not with the neighbouring row. | To apply at the signal step. |
+| Firms recently added to Compustat | Tidy Finance quotes the Fama and French (1993) rule (a firm is left out until it has been in Compustat for two years) as an exercise. JKP has no such rule. | Our extract already lacks the fiscal years closed before listing. A "two fiscal years available" filter is kept as a sensitivity test for accounting signals. |
+| Late or partial delisting proceeds | JKP compounds the delisting return into the delisting month unless the flag is A, P or V. Tidy Finance uses the CIZ returns as delivered, which already include it. Neither dates the availability of the amount; neither is a schedule of cash received. | JKP compounding; a separate status for V; missing when a required part is missing (D10); a check that the stock is not eligible again before the amount date; the mask `ret_signal_ok`. |
+| Restated accounts | JKP and Tidy Finance use standard Compustat with a fixed lag. | 6-month lag (course) and rule D12. |
+
+No reference solution was found for: combining quoted and high-low spreads;
+restatements; the funding of late delisting proceeds; the unknown return of a
+position already held; accounts missing before listing; secondary share
+classes; execution at the close; the 50 % cap on quoted spreads; NYSE
+breakpoints at the security level; the vintage of the Ken French factors. Astra
+is asked for hypotheses on these
+(`audit/AUDIT_corrections_finales_et_hypotheses_pour_Astra.md`).
+
+## Counter-audit and rules proposed before the backtest (Astra, 2026-11-12)
+
+Report: `Workspace/output/2026-11-12_AUDIT_corrections_et_hypotheses_pour_Claude.md`.
+Verdict on the corrections: "validated with reservations". Astra reran the eight
+scripts from the raw files, with no daily cache: 15 data files out of 15 have
+the same SHA-256. The blocking volume finding is solved (all 1,668 months with a
+real difference are flagged; 0 escapes the flag).
+
+**Counter-audit: reservations handled**
+- **Late delisting returns and aggregation.** The step 3 check protects the
+  delisted stock itself. Astra found 15 stock-months where such a return sits
+  next to another eligible security of the same company, and 3,103 next to an
+  eligible stock of the same FF49 industry in the same month. `retx` had no
+  restriction. Fix: new panel column `ret_signal_ok` (`del_flag = N`); the
+  dictionary requires it for `ret`, `retx` and `ret_exc` used as predictors, on
+  the source rows and before any lag, group, index or join. The signal step
+  must also test that changing a delisting return after t changes no signal,
+  including the signal of a peer.
+- **Two statuses of the funding of late proceeds** in this document: the old
+  scenario is now dated and points to the open decision.
+- **Three descriptions of the references** corrected in the table above
+  (exchange in JKP, next return in JKP, delisting in Tidy Finance).
+- Left as documented limits: size and modification time do not prove that the
+  bytes are the same across two reads; two runs at the same time are not
+  supported (run the chain one at a time); the direct check of step 9 is a
+  sample of 101 stocks.
+
+**Rules proposed before the backtest.** For the ten problems without a solution
+in the references, Astra gives a mechanism, a likely size, a way to measure it
+with our files, a rule that can be fixed in advance and a reference. **None is
+decided yet: each needs the project owner's validation before any result is
+seen.** In Astra's order of importance for the conclusion:
+
+| Rank | Problem | Rule proposed |
+|---|---|---|
+| 1 | Execution (B7) | Form the order after the close of t, send it for the next session, and simulate the trade at that session's observed close at the earliest. Without a reliable trade price or capacity, keep the old position or cash and carry the order, with a cancel horizon fixed in advance. Show close-to-close as a theoretical benchmark. 18.97 % of eligible formations have a stale price, a bid-ask average or no volume. |
+| 2 | Spreads (B1) | Quoted spread at t. Otherwise the high-low spread with observed ranges, times the ratio of the medians quoted / high-low of the size group over t−36 to t−1 (at least 100 pairs with positive values over 12 distinct months). Otherwise the mean quoted spread of the group at t. Otherwise an undetermined cost with the traded weight reported. Raw high-low as a sensitivity. The thresholds are first met in 1964-01 (nano, micro, small), 1967-04 (large) and 1984-01 (mega). |
+| 3 | Restatements (B2) | D12 with versions A and B, plus a stress test: shock book equity and earnings by ±10 % on 1 %, 5 % and 10 % of the firm-years (same shock for all months and securities of a firm-year), re-rank, and report positions, turnover and net alpha. No unconditional bound exists from a single vintage. |
+| 4 | 50 % cap on quoted spreads (B8) | Keep 50 % for the main result; record sensitivities at 100 % and without a cap before the backtest. For nano caps the cap lowers the monthly spread by 4.05 points at the median on the months it affects. |
+| 5 | Unknown return of a held position (B4) | Keep the position and its funding at the last observable mark, buy nothing with it, adjust once when trading resumes. Show three scenarios: −100 %, unchanged mark, and the 95 % quantile of past returns of the size group. On a value-weighted universe the unknown weight is 0.0015 % a month on average, 0.10 % at most. |
+| 6 | Late delisting proceeds (B3) | Receivable scenario: proceeds cannot be spent before the amount date, no borrowing against them. Show the two extremes (immediate credit; zero until proven). The amount date is 2 days after the month end at the median, 259 days at the 90th percentile. |
+| 7 | Accounts missing before listing (B5) | Keep every stock and its returns in version A. In version B give the neutral rank to a missing sub-score, with a missing flag; fill no accounting item. Report apart the variant with complete accounts and the one with two fiscal years. |
+| 8 | NYSE breakpoints (B9) | Keep the JKP convention and D7. If a size limit is applied later, justify it by costs and capacity and redo the test at the Ken French breakpoint. 30,431 p20 decisions change with the French breakpoints (0.18 % of market equity). |
+| 9 | Secondary share classes (B6) | Keep D5; same neutral-rank treatment as B5. Giving them the issuer's accounts is a sensitivity only (one balance sheet per issuer, full company market equity, weight limits by company). |
+| 10 | Vintage of the Ken French factors (B10) | Freeze the files and their hashes; use each model's own columns for ex post alphas. Stress the intercept with ±1, 5 and 10 basis points a month on the premia. A declared limit if the conclusion is stable. |
+
+References given by Astra, to check before they are cited in the report: Corwin
+and Schultz (2012); Shumway (1997); Shumway and Warther (1999); Fama and French
+(2008); Gompers, Ishii and Metrick (2010); Holden and Jacobsen (2014); Lyle,
+Siano and Yohn (2024); Freyberger et al. (NBER WP 30761); Asparouhova,
+Bessembinder and Kalcheva; a GAO report on restatements; "Noisy factors?"
+(Review of Finance, 2026).
+
+## Backtest rules validated by the project owner (2026-11-12)
+
+Principle: **the main number already pays for realism.** Wherever a rule offers
+a choice, the main version takes the cautious option, so that the result does
+not need a list of excuses. A separate scenario is kept only where the choice
+can change the conclusion. These rules are fixed before any backtest result is
+seen. They replace the proposals of the table above where they differ.
+
+| ID | Rule | Based on |
+|---|---|---|
+| D13 | **Execution one day after the signal.** The signal uses data up to the close of month t. The new portfolio is traded at the close of the first trading day of month t+1. During that first day the old portfolio is still held. A stock bought earns `(1 + ret_lead1) / (1 + ret_d1 of t+1) − 1` in t+1, where `ret_d1` is the first-day return (new column of `crsp_daily_agg`). If a stock has no return on that first day, its order is not executed that month and the old position is kept. The usual close-to-close return is shown as a comparison. | Project rule (no signal and trade at the same close); Asparouhova, Bessembinder and Kalcheva (2013) on noisy prices. No study was found that prescribes a one-day lag. |
+| D14 | **Spread without calibration.** Quoted spread when it exists; otherwise the raw high-low spread if the month has observed ranges (`n_hl_observed_21d > 0`); otherwise the mean of the available spreads of the size group in month t. Cost of a trade = half the spread × the absolute change in weight. Sensitivity: the high-low spread everywhere. | Chen and Velikov (2023): observed spreads when available, low-frequency estimates otherwise; these estimates are biased upward, the cautious direction. Astra's 36-month calibration is not adopted (too few pairs for mega caps before 1984). |
+| D15 | **Commissions before May 1975.** A one-way commission is added to the costs of the years with fixed commissions, from the annual series of Jones (2002). **The series is not in the project yet**: it must be obtained and checked before the backtest; until then the report must say that costs before 1975 leave out commissions. | Jones (2002): half the spread plus the commission was at least 1 % one way from 1953 to 1975. |
+| D16 | **Unknown return of a position already held: −100 %.** One pessimistic rule, no scenario (the weight concerned is 0.0015 % a month on average on a value-weighted universe). The count and weight of these cases are reported. | Astra B4; the three-scenario version is not adopted. |
+| D17 | **Delisting proceeds credited in the delisting month**, as in the references. The late amount dates (2 days after the month end at the median) are a declared limit. | JKP, Tidy Finance; Shumway (1997). Astra's receivable scenario is not adopted. |
+| D18 | **Missing signal: neutral rank.** Each characteristic is ranked within the month; a missing value gets the median rank, and a missing flag is kept. No accounting item is filled. The result on stocks with complete signals is reported next to the main one. Same rule for secondary share classes (D5) and for stocks without accounts yet. | Gu, Kelly and Xiu (2020); Bryzgalova et al. (2024): missing data are not random, so the complete-case result must be shown. |
+| D19 | **Three universes, fixed in advance**: all sizes; without stocks below the NYSE 20th percentile; and the cost rule of D7. Value weights are the main weighting. | Hou, Xue and Zhang (2020); Avramov, Cheng and Metzker (2023): machine-learning profits fall sharply without micro caps. |
+| D20 | **Alphas against two sets of factors**: the Ken French files, and factors rebuilt from our own data (our market return matches theirs at 0.99999). | Akey, Robertson and Simutin: alphas move with the vintage of the Fama-French files. |
+| D21 | **Turnover buffer of the course**: buy in the top 10 %, sell only outside the top 20 %. | Course; Novy-Marx and Velikov (2016): the most effective way to cut costs. |
+| D12 | Unchanged: version A (price signals) and version B (price and accounting signals), plus the 12-month lag test. Astra's random ±10 % stress test is not adopted. | Lyle, Siano and Yohn (2024). |
+
+**Comparisons shown next to the main number: three, not ten.** (1) version A
+against version B; (2) execution one day later against close-to-close; (3) the
+three universes.
+
+**Limits that no rule removes**, to state plainly in the report: accounts are in
+today's state, so version B stays exposed to restatements; costs before 1993
+are estimated, not observed; the NYSE breakpoints, the 50 % cap on quoted
+spreads and the vintage of the Ken French files are declared limits.
+
+**Not done, optional**: a second low-frequency spread estimator (Abdi and
+Ranaldo, 2017) averaged with the high-low one, as Chen and Velikov do.
+
+**Status of the sources.** These rules rest on abstracts and summaries read on
+2026-11-12, not on the full papers. Every figure quoted from them must be
+checked in the paper before it goes into the report.
+
+## Audit of the backtest rules (Astra, 2026-11-12)
+
+Report: `Workspace/output/2026-11-12_AUDIT_regles_backtest_pour_Claude.md`.
+Verdict: "to review". **No defect was found in the cleaned data**: Astra
+recomputed `ret_d1` from the raw daily CSV (4,891,218 keys, 0 difference), the 14
+outputs match the SHA-256 of the eight reports, and the dictionary has 148
+columns. All findings are about the specification of the backtest.
+
+**Fixed in the cleaning (finding 9, minor)**:
+- step 9 now checks six more `ret_d1` source cases recomputed by the auditor
+  (first day of the market calendar and not first row of the stock, suspension,
+  bid-ask close, D9 month, flag V);
+- dictionary: `ret_d1` has the role `audit` only. Read through the row of t+1
+  it is observed after the order is submitted; it is not a cost measure and not
+  a predictor, and a known value does not prove that a trade was possible.
+
+**Correction of a formula.** The price impact of the course has a square root
+(checked in `Courses/3.Trading costs.pptx`, slide 24: the equation has a radical
+around order / dollar volume; the text extract had lost it). Impact per dollar
+traded = `λ × sqrt(order / ADV)`, with λ in decimals. Unit test from slide 25:
+order of USD 100,000, ADV of USD 10 million, micro cap → 0.025 × sqrt(0.01) =
+25 basis points of the order.
+
+**Amendments to the rules, validated by the project owner on 2026-11-12, before
+any backtest result, with two changes to the table below**: (a) amendment 3 is
+simplified: the third universe (D7 rule) is dropped, two universes remain (all
+sizes as the main one; above the NYSE 20th percentile), because the order cap
+of amendment 2 already handles capacity without an extra threshold; (b) new
+rule D23: version A (price signals only) is the main conclusion, and the
+sub-period 1993–2025 (observed spreads, no fixed commissions) is shown next to
+1963–2025. Amendment 2 is rule D22. The final wording of every rule, with its
+justification, is in `ProjectJournal.md`, section 8.4.
+
+| # | Rule | Finding | Amendment proposed |
+|---|---|---|---|
+| 1 | D13 | A known `ret_d1` does not prove a closing trade (662,223 eligible formations have it with a bid-ask close or no volume; 1,275 have a delisting on or before day 1). | Separate valuation from execution. Orders (amounts) are frozen with the data of t and never replaced by the next candidate. An order is filled at the close of day 1 only if that day has a trade price, a positive volume and no delisting on or before it. Unfilled buy: cash. Unfilled sale: position kept. The order expires at the end of day 1. The fill flag is built from the daily table at the backtest step. |
+| 2 | D13, D14, D19 | No capacity limit and no price impact on the amounts traded. | Constant nominal capital of USD 100 million. Impact with the square root, λ = 0.025 (nano, micro), 0.015 (small), 0.010 (large, mega). ADV = the smaller of `dolvol_21d` and `dolvol_126d` at t, both required. Order capped at 1 % of ADV; one stress test at 0.5 %. |
+| 3 | D19 / D7 | The break-even rule of D7 uses the alpha of the tested sample: a selection after the fact. The main portfolio is not named. | Main number: all sizes, value weights, net of costs at USD 100 million with the capacity limit. Second universe: above the NYSE 20th percentile. Third universe: a capacity rule known at t (a size group is left out when more than 10 % of its desired amount exceeds the caps), in place of the alpha break-even test. |
+| 4 | D15 | The commission series is missing; zero would flatter 1963–1975. The "1 %" of Jones already includes the half spread; commissions do not stop in May 1975. | Use the commission series alone, added to our spread. No net result is shown on a period without commissions: until the series is in the project, the net result is reported only from the first month priced correctly, and labelled as such. |
+| 5 | D16 | A missing return is not a final loss (869 of 879 ordinary cases have a known return later). | Keep −100 %, named "full write-off convention", applied once to the lot held, no recovery booked. The mechanical end of the sample is excluded. Weight, effect in basis points and largest case are reported. |
+| 6 | D17 | A return credited in the month is not always cash that can be spent (0.444 % of capital in the worst month of a nano + micro control portfolio). | Keep D17; report the stock of late proceeds on the positions really held; do not call the rule cautious. |
+| 7 | D14 | Raw high-low is not cautious for all sizes (nano before 1993: 8.72 % quoted, 5.19 % high-low). | Keep D14. Group mean = arithmetic mean over the eligible stocks of the size group in t that have a quoted or an observed high-low spread (no imputed value as a donor). Report the turnover by source of cost. |
+| 8 | D12, D18, D20, D21 | Open parameters. | To freeze at the signal step: ranks scaled to [−1, 1], missing → 0 after ranking, fixed weights not rescaled by stock; a stock with no signal at all cannot start a purchase; buffer on the book really held, ties by PERMNO; rebuilt factors: market, SMB, HML, plus RMW, CMA and momentum if FF5 or momentum alphas are shown; t-statistics with a fixed HAC lag (6 months). |
+
+**Sources corrected by the audit** (to respect in the report):
+- Jones (2002): at least 1 % one way is the aggregate average of the half
+  spread of Dow stocks **plus** the average NYSE commission, not a floor for
+  each order;
+- Akey, Robertson and Simutin: "up to 4 % a year, momentum the most sensitive"
+  is **not** supported. Their Table 5A: 10 % of the alphas of B/M deciles and
+  5 % of momentum deciles move by more than 1 point a year;
+- Chen and Velikov (2023) prefer **effective** intraday spreads and average
+  four low-frequency proxies; D14 is a simpler adaptation, not their method;
+- Shumway (1997): −30 % is an empirical average (−29.9 % on 734 observed
+  cases), not a prescription; Shumway and Warther (1999): −55 % for missing
+  performance delistings on NASDAQ only;
+- Bryzgalova et al.: more than 70 % of firms miss **at least one** of 45
+  characteristics;
+- Asparouhova et al. (2013) motivate care with noisy prices, not a one-day lag.
+
+## Final runs and reproducibility (2026-11-12)
+
+The whole chain was rerun from the raw files after the scripts were moved to
+`scripts/data_cleaning/` and after the step 9 corrections. The run ids quoted in
+each step above are older; the current ones are:
+
+| Step | Script | Run id |
+|---|---|---|
+| 1-2 | `1_crsp_monthly.py` | `591588b4ddfc` |
+| 3 | `3_crsp_universe.py` | `675782030a3a` |
+| 4 | `4_crsp_size.py` | `3a0b1171f186` |
+| 5 | `5_crsp_excess.py` | `f920bd39db56` |
+| 6 | `6_ccm_links.py` | `90aff624d621` |
+| 7 | `7_compustat_annual.py` | `a20b514d1dab` |
+| 8 | `8_accounting_availability.py` | `87be465f4640` |
+| 9 | `9_crsp_daily_agg.py` | `86a807cdfece` |
+
+- **Reproducibility defect found and fixed.** The first full rerun showed six
+  outputs changing from one run to the next. Cause: in step 1, the product of
+  the daily returns of the added delisting rows (D9) was computed in an order
+  that was not fixed (`unique()` does not keep the row order). Effect:
+  `ret_pre_delist` on 77 rows and `ret` on 61 rows differed at the 16th decimal,
+  with no change in missing values. The rows are now sorted by `PERMNO` and
+  `DlyCalDt` before the product.
+- Two full runs in a row then give **15 outputs out of 15 identical byte for
+  byte**.
+- The SHA-256 of the seven WRDS files and of the five Ken French files were
+  checked again against the step reports on 2026-11-12: all equal.
 
 ## Order of implementation
 

@@ -30,9 +30,12 @@ from __future__ import annotations
 
 import re
 
+import io
+
 import polars as pl
 
 from utils import (PROCESSED, PROJECT, RAW, CheckError, adj_trd_vol_nasdaq, check, publish,
+                   read_raw_sized,
                    read_verified, sha256)
 
 SEC = RAW / "crsp_ciz_security_history.csv"
@@ -45,7 +48,8 @@ SAMPLE_START = 196301  # first month of the analysis sample (for summary counts 
 
 def read_security_history(report: dict) -> pl.DataFrame:
     # Security history, typed. Intervals must not overlap within a permno.
-    sec = pl.read_csv(SEC, infer_schema=False).select(
+    # Read the bytes once: the hash in the report is the hash of what is parsed.
+    sec = pl.read_csv(io.BytesIO(read_raw_sized(SEC, report)), infer_schema=False).select(
         pl.col("permno").cast(pl.Int64, strict=True),
         pl.col("secinfostartdt").str.to_date("%Y-%m-%d", strict=True),
         pl.col("secinfoenddt").str.to_date("%Y-%m-%d", strict=True),
@@ -65,9 +69,10 @@ def read_security_history(report: dict) -> pl.DataFrame:
     ).height
     check(overlap == 0, f"{overlap} overlapping security info intervals")
     report["security_history_rows"] = sec.height
-    # JKP crsp_industry: sic = 0 means unknown.
+    # JKP crsp_industry: sic = 0 means unknown. Same for naics = 0 (no industry).
     return sec.with_columns(
-        siccd=pl.when(pl.col("siccd") == 0).then(None).otherwise(pl.col("siccd"))
+        siccd=pl.when(pl.col("siccd") == 0).then(None).otherwise(pl.col("siccd")),
+        naics=pl.when(pl.col("naics") == 0).then(None).otherwise(pl.col("naics")),
     )
 
 
@@ -177,6 +182,11 @@ def add_flags(df: pl.DataFrame, mapping: pl.DataFrame, report: dict) -> pl.DataF
         & pl.col("me").is_not_null() & (pl.col("del_flag") == "N").fill_null(False)
     ).with_columns(
         crsp_nyse=pl.col("eligible") & (pl.col("primaryexch") == "N"),
+        # Mask for returns used as predictors (ret, retx, ret_exc): only a month
+        # without a delisting. A delisting-month return can rest on an amount known
+        # later, or be partial. Apply it to the SOURCE rows, before any lag, group,
+        # index or join to another security.
+        ret_signal_ok=(pl.col("del_flag") == "N").fill_null(False),
     )
 
     # NASDAQ volume: exchange at the date if active there; otherwise (delisting
@@ -220,6 +230,55 @@ def add_flags(df: pl.DataFrame, mapping: pl.DataFrame, report: dict) -> pl.DataF
     report["eligible_sic_missing"] = e["sic"].null_count()
     report["eligible_ff49_missing"] = e["ff49"].null_count()
     report["eligible_cusip_missing"] = e["cusip"].null_count()
+    return df
+
+
+def flag_exchange_transfers(df: pl.DataFrame, sec: pl.DataFrame, report: dict) -> pl.DataFrame:
+    """
+    Description:
+        The monthly volume adjustment uses one exchange for the whole month. If the
+        stock traded on NASDAQ for a part of the month only, the monthly adjusted
+        volume cannot be right: it is set to missing (the daily table of step 9
+        adjusts each day on its own exchange).
+    Steps:
+        1) Only months up to 2003-12 matter (the adjustment is 1 after).
+        2) Active intervals of the security history that overlap the month, from
+           its first day to the row date.
+        3) Transfer = one of them is on the other side (NASDAQ or not) of the
+           exchange used for the month.
+    Output:
+        Panel with vol_exch_transfer; vol_adj and dolvol null on those rows.
+    """
+    active_now = (pl.col("tradingstatusflg") == "A").fill_null(False)
+    used = (pl.when(active_now).then(pl.col("primaryexch"))
+            .otherwise(pl.col("primaryexch_last_active")) == "Q").fill_null(False)
+    act = sec.filter(pl.col("tradingstatusflg") == "A").select(
+        "permno", pl.col("secinfostartdt").alias("s"), pl.col("secinfoenddt").alias("e"),
+        (pl.col("primaryexch") == "Q").alias("q"))
+    m = df.filter(pl.col("date") <= pl.date(2003, 12, 31)).select(
+        "permno", "eom", "date", pl.col("eom").dt.month_start().alias("month_start"),
+        used.alias("used"))
+    chg = (
+        m.join(act, on="permno")
+        .filter((pl.col("s") <= pl.col("date")) & (pl.col("e") >= pl.col("month_start")))
+        .group_by("permno", "eom").agg((pl.col("q") != pl.col("used")).any().alias("vol_exch_transfer"))
+    )
+    n = df.height
+    df = df.join(chg, on=["permno", "eom"], how="left").with_columns(
+        pl.col("vol_exch_transfer").fill_null(False))
+    check(df.height == n, "Transfer flag changed the row count")
+    keep = ~pl.col("vol_exch_transfer")
+    df = df.with_columns(vol_adj=pl.when(keep).then(pl.col("vol_adj")),
+                         dolvol=pl.when(keep).then(pl.col("dolvol")))
+    report["vol_exchange_transfer_months"] = {
+        "all": int(df["vol_exch_transfer"].sum()),
+        "eligible_from_1963": df.filter(pl.col("vol_exch_transfer") & pl.col("eligible")
+                                        & (pl.col("yyyymm") >= SAMPLE_START)).height,
+    }
+    # Audit reference case: PERMNO 62500, March 2000 (NYSE until the 20th, then NASDAQ).
+    ref = df.filter((pl.col("permno") == 62500) & (pl.col("yyyymm") == 200003))
+    check(ref.height == 1 and ref["vol_exch_transfer"].item() and ref["vol_adj"].item() is None,
+          "Reference case 62500 (March 2000): exchange transfer not flagged")
     return df
 
 
@@ -283,6 +342,16 @@ def add_next_month_return(df: pl.DataFrame, report: dict) -> pl.DataFrame:
 
 
 def checks(df: pl.DataFrame, report: dict) -> None:
+    # A delisting return can rest on an amount known after the month (delamtdt >
+    # eom). It must never reach a signal: the stock must not be eligible again
+    # before that amount is known.
+    late = df.filter(pl.col("delamtdt") > pl.col("eom")).select(
+        "permno", pl.col("eom").alias("eom_late"), "delamtdt")
+    again = (df.filter("eligible").select("permno", "eom").join(late, on="permno")
+             .filter((pl.col("eom") > pl.col("eom_late")) & (pl.col("eom") < pl.col("delamtdt"))))
+    report["late_delisting_amount_rows"] = late.height
+    check(again.height == 0,
+          f"{again.height} eligible rows between a delisting month and its late amount date")
     check(df.select("permno", "yyyymm").is_duplicated().sum() == 0, "Duplicate permno-month")
     # An eligible row must have its security info and a positive me.
     e = df.filter("eligible")
@@ -332,13 +401,14 @@ def main() -> None:
     panel, run_id = read_verified(PANEL, PANEL_REPORT)
     report["inputs"] = {
         PANEL.name: {"from_run": run_id},
-        SEC.name: sha256(SEC), INDEX.name: sha256(INDEX), SICCODES.name: sha256(SICCODES),
+        INDEX.name: sha256(INDEX), SICCODES.name: sha256(SICCODES),
     }
     sec = read_security_history(report)
     mapping = parse_siccodes(SICCODES)
 
     df = join_security_info(panel, sec, report)
     df = add_flags(df, mapping, report)
+    df = flag_exchange_transfers(df, sec, report)
     df = add_next_month_return(df, report)
     checks(df, report)
 

@@ -35,15 +35,19 @@ from __future__ import annotations
 
 import io
 import json
+import uuid
 import zipfile
 
 import polars as pl
 
-from utils import (PROCESSED, RAW, CheckError, adj_trd_vol_nasdaq, check, publish, read_raw_verified,
+from utils import (PROCESSED, RAW, CheckError, adj_trd_vol_nasdaq, check, check_unchanged,
+                   file_stamps, publish, read_raw_sized,
+                   read_raw_verified,
                    read_verified, sha256)
 
 DAILY = RAW / "crsp_ciz_daily_stock.csv"
 DAILY_MIN = PROCESSED / "crsp_daily_min.parquet"
+SEC = RAW / "crsp_ciz_security_history.csv"
 FF_DAILY = RAW / "french" / "F-F_Research_Data_Factors_daily_CSV.zip"
 PANEL = PROCESSED / "crsp_panel_acc.parquet"
 PANEL_REPORT = PROCESSED / "accounting_availability_report.json"
@@ -80,6 +84,7 @@ def convert_daily(report: dict) -> None:
     manifest = json.loads((RAW / "manifest.json").read_text(encoding="utf-8"))
     size = {f["filename"]: f["bytes"] for f in manifest["files"]}.get(DAILY.name)
     check(size == DAILY.stat().st_size, f"{DAILY.name}: size differs from the raw manifest")
+    before = file_stamps([DAILY])
     digest = sha256(DAILY)
     step1 = json.loads(STEP1_REPORT.read_text(encoding="utf-8"))["inputs"][DAILY.name]
     check(digest == step1, f"{DAILY.name} is not the file read at step 1")
@@ -96,7 +101,7 @@ def convert_daily(report: dict) -> None:
                 and old.get("parquet_sha256") == sha256(DAILY_MIN)):
             return
     num = lambda c: pl.col(c).cast(pl.Float64, strict=True)
-    tmp = DAILY_MIN.with_name(DAILY_MIN.name + ".tmp")
+    tmp = DAILY_MIN.with_name(f"{DAILY_MIN.name}.{uuid.uuid4().hex[:12]}.tmp")
     (
         pl.scan_csv(DAILY, infer_schema=False)
         .select(
@@ -111,9 +116,63 @@ def convert_daily(report: dict) -> None:
         )
         .sink_parquet(tmp, row_group_size=1_000_000)
     )
+    # The file was hashed first and converted after: it must not have changed.
+    check_unchanged(before)
     tmp.replace(DAILY_MIN)
-    stamp.write_text(json.dumps({"raw_sha256": digest, "version": CONVERT_VERSION,
-                                 "parquet_sha256": sha256(DAILY_MIN)}), encoding="utf-8")
+    # Temp file then rename, so a stop cannot leave a half-written stamp.
+    stamp_tmp = stamp.with_name(f"{stamp.name}.{uuid.uuid4().hex[:12]}.tmp")
+    stamp_tmp.write_text(json.dumps({"raw_sha256": digest, "version": CONVERT_VERSION,
+                                     "parquet_sha256": sha256(DAILY_MIN)}), encoding="utf-8")
+    stamp_tmp.replace(stamp)
+
+
+def read_exchange_history(report: dict) -> pl.DataFrame:
+    # Security history: exchange and trading status by date interval (step 3 source).
+    sec = pl.read_csv(io.BytesIO(read_raw_sized(SEC, report)), infer_schema=False).select(
+        pl.col("permno").cast(pl.Int64, strict=True),
+        pl.col("secinfostartdt").str.to_date("%Y-%m-%d", strict=True),
+        pl.col("secinfoenddt").str.to_date("%Y-%m-%d", strict=True),
+        "primaryexch", "tradingstatusflg",
+    )
+    check(sec.null_count().sum_horizontal().item() == 0, "Null values in the security history")
+    sec = sec.sort("permno", "secinfostartdt")
+    overlap = sec.filter(
+        pl.col("secinfostartdt") <= pl.col("secinfoenddt").shift(1).over("permno")).height
+    check(overlap == 0, f"{overlap} overlapping security info intervals")
+    return sec
+
+
+def add_daily_exchange(d: pl.DataFrame, sec: pl.DataFrame) -> pl.DataFrame:
+    """
+    Description:
+        NASDAQ flag of each DAY, with the step 3 rule applied at the daily date.
+    Steps:
+        1) Interval of the security history that holds the date (bounds included).
+        2) If the stock is active there, its exchange. Otherwise the exchange of
+           the last active interval started on or before the date.
+        3) is_nasdaq is null when no exchange is known.
+    Output:
+        Daily rows with is_nasdaq.
+    """
+    cols = d.columns
+    s = sec.filter(pl.col("permno").is_in(d["permno"].unique().implode()))
+    active = s.filter(pl.col("tradingstatusflg") == "A").select(
+        "permno", pl.col("secinfostartdt").alias("start_active"),
+        pl.col("primaryexch").alias("exch_last_active"))
+    n = d.height
+    d = (
+        d.sort("date")
+        .join_asof(s.sort("secinfostartdt"), left_on="date", right_on="secinfostartdt",
+                   by="permno", strategy="backward", check_sortedness=False)
+        .join_asof(active.sort("start_active"), left_on="date", right_on="start_active",
+                   by="permno", strategy="backward", check_sortedness=False)
+    )
+    check(d.height == n, "Exchange join changed the row count")
+    active_now = ((pl.col("secinfoenddt") >= pl.col("date"))
+                  & (pl.col("tradingstatusflg") == "A")).fill_null(False)
+    exch = pl.when(active_now).then(pl.col("primaryexch")).otherwise(pl.col("exch_last_active"))
+    return d.with_columns(is_nasdaq=pl.when(exch.is_not_null()).then(exch == "Q")).select(
+        cols + ["is_nasdaq"]).sort("permno", "date")
 
 
 def read_french_daily(report: dict) -> pl.DataFrame:
@@ -137,24 +196,30 @@ def read_french_daily(report: dict) -> pl.DataFrame:
     check(df.null_count().sum_horizontal().item() == 0, "Missing daily market or risk-free return")
     check(df.select(pl.col("mktrf", "rf").is_finite().all()).row(0) == (True, True), "Non-finite factor")
     report["french_daily"] = {"days": df.height, "first": df["date"].min(), "last": df["date"].max()}
-    return df
+    # First trading day of each month in the market calendar (for ret_d1).
+    month = pl.col("date").dt.year() * 100 + pl.col("date").dt.month()
+    return df.with_columns(first_of_month=pl.col("date") == pl.col("date").min().over(month))
 
 
-def prepare_batch(d: pl.DataFrame, ff: pl.DataFrame, nasdaq: pl.DataFrame, counts: dict) -> pl.DataFrame:
+def prepare_batch(d: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, counts: dict) -> pl.DataFrame:
     """
     Description:
         Clean the daily rows of a group of stocks (JKP prepare_daily, reduced).
     Steps:
         1) Drop exact duplicate rows; (permno, date) must then be unique.
         2) Drop rows with DlyDelFlg = 'Y' (JKP).
-        3) A return after a gap of more than 14 days is set to null (JKP).
-        4) Join the market and risk-free returns; keep days with a market return (JKP).
-        5) ret_exc = ret - rf; dollar volume with the NASDAQ adjustment; quoted spread.
+        3) A return whose previous valid price is more than 14 days old is set to
+           null: it is not a one-day return (project rule; JKP's CRSP branch does
+           not apply its 14-day rule).
+        4) Join the market and risk-free returns; every CRSP day must have one.
+        5) ret_exc = ret - rf; dollar volume with the NASDAQ adjustment of the
+           exchange of the DAY; quoted spread.
     Output:
         Daily rows with ret_exc, mktrf, dolvol_d, spread_d.
     """
     n0 = d.height
-    d = d.unique()
+    # JKP practice: unique() does not keep the row order, so sort right after it.
+    d = d.unique().sort("permno", "date")
     counts["exact_duplicate_rows"] += n0 - d.height
     check(d.select("permno", "date").is_unique().all(), "Conflicting duplicate (permno, date)")
     check(d["del_flag"].null_count() == 0 and set(d["del_flag"].unique()) <= {"N", "Y"},
@@ -167,20 +232,34 @@ def prepare_batch(d: pl.DataFrame, ff: pl.DataFrame, nasdaq: pl.DataFrame, count
 
     d = (
         d.filter(pl.col("del_flag") == "N").sort("permno", "date")
-        .with_columns(gap=(pl.col("date") - pl.col("date").shift(1).over("permno")).dt.total_days())
+        .with_columns(
+            # Days since the previous row, and since the previous row WITH a price
+            # (rows without a price can sit between two prices).
+            gap_row=(pl.col("date") - pl.col("date").shift(1).over("permno")).dt.total_days(),
+            gap=(pl.col("date") - pl.when(pl.col("prc").is_not_null()).then(pl.col("date"))
+                 .forward_fill().shift(1).over("permno")).dt.total_days(),
+        )
     )
-    counts["returns_dropped_after_long_gap"] += d.filter(
-        pl.col("ret").is_not_null() & (pl.col("gap") > MAX_RET_GAP_DAYS)).height
+    has_ret = pl.col("ret").is_not_null()
+    counts["returns_after_row_gap_over_14d"] += d.filter(has_ret & (pl.col("gap_row") > MAX_RET_GAP_DAYS)).height
+    counts["returns_dropped_after_long_gap"] += d.filter(has_ret & (pl.col("gap") > MAX_RET_GAP_DAYS)).height
+    counts["returns_without_previous_price"] += d.filter(has_ret & pl.col("gap").is_null()).height
     d = (
         d.with_columns(
             ret_raw=pl.col("ret"),   # CRSP return, kept for the check against monthly returns
             ret=pl.when(pl.col("gap") <= MAX_RET_GAP_DAYS).then(pl.col("ret")),
+            long_gap=has_ret & (pl.col("gap") > MAX_RET_GAP_DAYS),
             ym=(pl.col("date").dt.year() * 100 + pl.col("date").dt.month()).cast(pl.Int32),
         )
         .join(ff, on="date", how="left")
     )
-    counts["rows_without_market_return"] += d.filter(pl.col("mktrf").is_null()).height
-    d = d.filter(pl.col("mktrf").is_not_null()).join(nasdaq, on=["permno", "ym"], how="left")
+    # Every CRSP trading day must be in the market calendar: a missing date would
+    # silently drop that day for every stock and every measure.
+    missing = d.filter(pl.col("mktrf").is_null())
+    counts["rows_without_market_return"] += missing.height
+    check(missing.height == 0, f"{missing.height} daily rows on dates missing from the market "
+                               f"calendar, e.g. {missing['date'].min()}")
+    d = add_daily_exchange(d.drop("gap_row"), sec)
     counts["rows_with_unknown_exchange"] += d.filter(pl.col("is_nasdaq").is_null()).height
     return d.with_columns(
         ret_exc=pl.col("ret") - pl.col("rf"),
@@ -188,7 +267,7 @@ def prepare_batch(d: pl.DataFrame, ff: pl.DataFrame, nasdaq: pl.DataFrame, count
     ).with_columns(
         adj_trd_vol_nasdaq("date", "vol_adj", pl.col("is_nasdaq").fill_null(False)),
     ).with_columns(
-        # Dollar volume; unknown when the exchange of the month is unknown.
+        # Dollar volume; unknown when the exchange of the day is unknown.
         dolvol_d=pl.when(pl.col("is_nasdaq").is_not_null()).then(pl.col("prc").abs() * pl.col("vol_adj")),
         # Quoted spread over the midpoint; only with a valid, uncrossed quote.
         spread_d=pl.when((pl.col("bid") > 0) & (pl.col("ask") > pl.col("bid")))
@@ -223,6 +302,12 @@ def add_high_low_spread(d: pl.DataFrame) -> pl.DataFrame:
         .then(col("low") / col("cfacshr")),
         prc_adj=pl.when(col("cfacshr") > 0).then(col("prc") / col("cfacshr")),
         bidask=(col("prc_flag") == "BA").cast(pl.Int32),
+    ).with_columns(
+        # A range seen that day: a trade price, some volume, high above low.
+        # (and a high / low ratio of at most 8, the filter of the estimator).
+        hl_observed=((col("bidask") == 0) & (col("vol") > 0) & (col("prc_low") > 0)
+                     & (col("prc_high") > col("prc_low"))
+                     & (col("prc_high") / col("prc_low") <= 8)).fill_null(False),
     ).rename({"prc": "prc_unadj", "prc_adj": "prc", "vol": "tvol", "permno": "id"})
 
     # --- impute_high_low (JKP, copied) ---
@@ -312,7 +397,7 @@ def add_high_low_spread(d: pl.DataFrame) -> pl.DataFrame:
         .with_columns(spread=2 * (col("alpha").exp() - 1) / (1 + col("alpha").exp()))
         .with_columns(spread_hl_d=pl.when(col("spread") < 0).then(pl.lit(0.0)).otherwise(col("spread")))
     )
-    keep = [c for c in d.columns] + ["spread_hl_d"]
+    keep = [c for c in d.columns] + ["spread_hl_d", "hl_observed"]
     return df.rename({"prc": "prc_adj", "prc_unadj": "prc", "tvol": "vol", "id": "permno"}).select(keep)
 
 
@@ -321,16 +406,27 @@ def month_sums(d: pl.DataFrame) -> pl.DataFrame:
     ok = pl.col("ret_exc").is_not_null()
     r, m = pl.col("ret_exc").filter(ok), pl.col("mktrf").filter(ok)
     raw = pl.col("ret").filter(ok)
-    return d.group_by("permno", "ym").agg(
+    # JKP practice (capm): fix the row order before sums of floats, which depend on
+    # the order of their terms, so that two runs give the same bytes.
+    return d.sort("permno", "date").group_by("permno", "ym", maintain_order=True).agg(
         n=ok.sum().cast(pl.Int64), n_zero=(raw == 0).sum().cast(pl.Int64),
         s_r=r.sum(), s_rr=(r * r).sum(), s_m=m.sum(), s_mm=(m * m).sum(), s_rm=(r * m).sum(),
         s_raw=raw.sum(), s_raw2=(raw * raw).sum(),
         n_dv=pl.col("dolvol_d").count().cast(pl.Int64), s_dv=pl.col("dolvol_d").sum(),
         n_sp=pl.col("spread_d").count().cast(pl.Int64), s_sp=pl.col("spread_d").sum(),
         n_hl=pl.col("spread_hl_d").count().cast(pl.Int64), s_hl=pl.col("spread_hl_d").sum(),
+        n_hl_obs=pl.col("hl_observed").sum().cast(pl.Int64),
+        s_vol=pl.col("vol").sum(), s_vol_adj=pl.col("vol_adj").sum(),
+        n_nasdaq_days=pl.col("is_nasdaq").sum().cast(pl.Int64),
+        n_exch_days=pl.col("is_nasdaq").count().cast(pl.Int64),
+        n_long_gap=pl.col("long_gap").sum().cast(pl.Int64),
         # For the check against CRSP monthly returns: all days of the month compounded.
         n_days=pl.len().cast(pl.Int64), n_ret_raw=pl.col("ret_raw").count().cast(pl.Int64),
         ret_cmp=(1 + pl.col("ret_raw")).product() - 1,
+        # CRSP return of the first trading day of the month (market calendar). Null
+        # if the stock has no row or no return that day. It lets the backtest start
+        # a holding month at the close of its first day instead of the close of t.
+        ret_d1=pl.col("ret_raw").filter(pl.col("first_of_month")).first(),
         last_date=pl.col("date").max(),
     )
 
@@ -365,6 +461,8 @@ def window_stats(s: pl.DataFrame) -> pl.DataFrame:
     cov12 = (pl.col("s_rm_12") - pl.col("s_r_12") * pl.col("s_m_12") / pl.col("n_12")) / (pl.col("n_12") - 1)
     return out.select(
         "permno", pl.col("ym").alias("yyyymm"), "last_date", "n_days", "n_ret_raw", "ret_cmp",
+        "n_long_gap", "s_vol", "s_vol_adj", "n_nasdaq_days", "n_exch_days",
+        "ret_d1",
         pl.col("n").alias("n_ret_21d"), pl.col("n_12").alias("n_ret_252d"),
         guarded(var("n", "s_r", "s_rr").clip(lower_bound=0).sqrt(), "", MIN_OBS["21d"]).alias("rvol_21d"),
         guarded(var("n_12", "s_r_12", "s_rr_12").clip(lower_bound=0).sqrt(), "_12", MIN_OBS["252d"])
@@ -377,20 +475,31 @@ def window_stats(s: pl.DataFrame) -> pl.DataFrame:
         pl.when(pl.col("n_sp") >= MIN_SPREAD_DAYS).then(pl.col("s_sp") / pl.col("n_sp"))
         .alias("spread_quoted_21d"),
         pl.col("n_hl").alias("n_spread_hl_21d"),
+        # Days of the month with an observed range; 0 = the estimate rests only on
+        # ranges carried from earlier days (JKP impute_high_low).
+        pl.col("n_hl_obs").alias("n_hl_observed_21d"),
         # JKP bidaskhl_21d: monthly mean, more than 10 days (strictly, as in JKP).
         pl.when(pl.col("n_hl") > MIN_SPREAD_DAYS).then(pl.col("s_hl") / pl.col("n_hl"))
         .alias("bidaskhl_21d"),
     )
 
 
-def check_direct(out: pl.DataFrame, ff: pl.DataFrame, nasdaq: pl.DataFrame, report: dict) -> None:
+def check_direct(out: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, report: dict) -> None:
     # Second route on a sample of stocks: compute every statistic directly from the
     # daily rows of each window (no sums), and compare.
-    sample = out.select("permno").unique().sort("permno").gather_every(400)["permno"].to_list()
+    # The sample comes from the daily input, not from the output under test.
+    sample = (pl.scan_parquet(DAILY_MIN).select("permno").unique().collect()["permno"].sort()
+              .gather_every(400).to_list())
     d = prepare_batch(pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_in(sample)).collect(),
-                      ff, nasdaq, {k: 0 for k in COUNTS})
+                      ff, sec, {k: 0 for k in COUNTS})
     d = d.with_columns(mi=(pl.col("ym") // 100 * 12 + pl.col("ym") % 100).cast(pl.Int64))
     months = d.select("permno", "mi").unique()
+    # The stock-months of the sample must be exactly the published ones.
+    pub = (out.filter(pl.col("permno").is_in(sample))
+           .select("permno", (pl.col("yyyymm") // 100 * 12 + pl.col("yyyymm") % 100).cast(pl.Int64).alias("mi")))
+    key_diff = pub.join(months, on=["permno", "mi"], how="anti").height \
+        + months.join(pub, on=["permno", "mi"], how="anti").height
+    check(key_diff == 0, f"{key_diff} stock-months differ between the output and the direct check")
     worst = {}
     for k, cols in [(1, ["rvol_21d", "dolvol_21d", "spread_quoted_21d", "bidaskhl_21d"]),
                     (6, ["dolvol_126d"]), (12, ["rvol_252d", "beta_252d"])]:
@@ -423,6 +532,7 @@ def check_direct(out: pl.DataFrame, ff: pl.DataFrame, nasdaq: pl.DataFrame, repo
 
 
 COUNTS = ["rows", "exact_duplicate_rows", "delisting_rows_dropped", "returns_dropped_after_long_gap",
+          "returns_after_row_gap_over_14d", "returns_without_previous_price",
           "rows_without_market_return", "rows_with_unknown_exchange"]
 
 
@@ -436,6 +546,81 @@ def checks(out: pl.DataFrame, panel: pl.DataFrame, report: dict) -> None:
         check(out.filter(pl.col(c).is_not_null() & ~pl.col(c).is_finite()).height == 0, f"Non-finite {c}")
     check(out.filter(pl.col("beta_252d").is_not_null() & ~pl.col("beta_252d").is_finite()).height == 0,
           "Non-finite beta")
+
+    # First-day return: a real return, and consistent with the month. On months
+    # with a return every day, (1 + ret_d1) x (rest of the month) = the compounded
+    # month, so the rest of the month must be a valid return too.
+    check(out.filter(pl.col("ret_d1") < -1).height == 0, "First-day return below -100 %")
+    check(out.filter(pl.col("ret_d1").is_not_null() & ~pl.col("ret_d1").is_finite()).height == 0,
+          "Non-finite first-day return")
+    full = out.filter((pl.col("n_ret_raw") == pl.col("n_days")) & (pl.col("ret_d1") > -1))
+    rest = (1 + pl.col("ret_cmp")) / (1 + pl.col("ret_d1")) - 1
+    check(full.filter((rest < -1 - 1e-9) | ~rest.is_finite()).height == 0,
+          "Return after the first day is not a valid return")
+    report["ret_d1"] = {"known": int(out["ret_d1"].is_not_null().sum()), "rows": out.height}
+    # Reference: Apple (14593), August 2020. First trading day August 3: +2.52 %.
+    ref = out.filter((pl.col("permno") == 14593) & (pl.col("yyyymm") == 202008))["ret_d1"]
+    report["reference_14593_202008_ret_d1"] = ref.to_list()
+    check(ref.len() == 1 and ref[0] is not None and abs(ref[0] - 0.0252) < 0.0005,
+          f"Reference 14593 (ret_d1) failed: {ref.to_list()}")
+    # Independent source cases, recomputed by the auditor from the raw daily CSV
+    # (audit of the backtest rules, 2026-11-12). They test that the day chosen is
+    # the first day of the MARKET calendar, not the first row of the stock:
+    # 10000, 1986-01: market open on the 2nd, first row of the stock on the 7th;
+    # 37022, 1978-12: row on the 1st without a return (suspension);
+    # 10050, 1978-06 and 65788, 1974-10: bid-ask close on the first day;
+    # 12964, 2013-07: delisting month added by D9; 12085, 2014-02: flag V.
+    d1_cases = [(10000, 198601, None), (37022, 197812, None), (10050, 197806, 0.0),
+                (12964, 201307, -0.754254), (65788, 197410, -0.30), (12085, 201402, -0.009456)]
+    d1_seen = {}
+    for permno, yyyymm, expected in d1_cases:
+        got = out.filter((pl.col("permno") == permno) & (pl.col("yyyymm") == yyyymm))["ret_d1"].to_list()
+        d1_seen[f"{permno}_{yyyymm}"] = got
+        ok = len(got) == 1 and (got[0] is None if expected is None
+                                else got[0] is not None and abs(got[0] - expected) < 5e-7)
+        check(ok, f"Reference {permno} {yyyymm} (ret_d1) failed: {got}, expected {expected}")
+    report["reference_ret_d1_source_cases"] = d1_seen
+
+    # Audit reference cases (step 9 audit).
+    # 62500, March 2000: NYSE until the 20th, NASDAQ from the 21st. The volume must
+    # be adjusted day by day (29.1 million USD a day; 17.1 with a monthly flag).
+    ref = out.filter((pl.col("permno") == 62500) & (pl.col("yyyymm") == 200003))["dolvol_21d"]
+    report["reference_62500_200003_dolvol_21d"] = ref.to_list()
+    check(ref.len() == 1 and abs(ref[0] - 29_143_056) < 1_000, f"Reference 62500 failed: {ref.to_list()}")
+    # 37022, December 1978: a +103 % return after weeks without a price must not
+    # enter the volatility (1.05 % a day; 23.65 % with it).
+    ref = out.filter((pl.col("permno") == 37022) & (pl.col("yyyymm") == 197812))["rvol_21d"]
+    report["reference_37022_197812_rvol_21d"] = ref.to_list()
+    check(ref.len() == 1 and ref[0] is not None and abs(ref[0] - 0.0105) < 0.0005,
+          f"Reference 37022 failed: {ref.to_list()}")
+    report["stock_months_with_a_dropped_long_gap_return"] = out.filter(pl.col("n_long_gap") > 0).height
+    # High-low spread resting only on carried ranges.
+    report["high_low_months_without_observed_range"] = out.filter(
+        pl.col("bidaskhl_21d").is_not_null() & (pl.col("n_hl_observed_21d") == 0)).height
+
+    # Cross-step check of the monthly adjusted volume of step 3. On months where
+    # the daily rows add up to the monthly raw volume:
+    #  - no exchange transfer: the monthly adjusted volume = the sum of the daily ones;
+    #  - transfer flagged at step 3: the monthly value must be missing.
+    v = (panel.select("permno", "yyyymm", "vol", "vol_adj", "vol_exch_transfer")
+         .join(out.select("permno", "yyyymm", "s_vol", "s_vol_adj", "n_nasdaq_days", "n_exch_days"),
+               on=["permno", "yyyymm"])
+         .filter((pl.col("vol") == pl.col("s_vol")) & (pl.col("yyyymm") <= 200312)))
+    mixed = (pl.col("n_nasdaq_days") > 0) & (pl.col("n_nasdaq_days") < pl.col("n_exch_days"))
+    bad = v.filter(pl.col("vol_adj").is_not_null()
+                   & ((pl.col("vol_adj") - pl.col("s_vol_adj")).abs()
+                      > 1e-6 * pl.col("vol_adj").abs().clip(lower_bound=1.0)))
+    report["monthly_vs_daily_adjusted_volume"] = {
+        "months_compared": v.height, "differences": bad.height,
+        "months_with_a_transfer_in_the_daily_rows": v.filter(mixed).height,
+        "of_which_flagged_at_step_3": v.filter(mixed & pl.col("vol_exch_transfer")).height,
+    }
+    check(bad.height == 0, f"{bad.height} months where the monthly adjusted volume of step 3 "
+                           f"differs from the sum of the daily ones")
+    # Not flagged at step 3 but mixed in the daily rows: allowed only if the values
+    # agree (checked above), e.g. all the volume traded on one side.
+    report["monthly_vs_daily_adjusted_volume"]["mixed_not_flagged_but_equal"] = v.filter(
+        mixed & pl.col("vol_adj").is_not_null()).height
 
     j = panel.select("permno", "yyyymm", "eom", "eligible", "me", "ret_crsp", "del_flag", "size_grp"
                      ).join(out, on=["permno", "yyyymm"], how="left")
@@ -452,9 +637,16 @@ def checks(out: pl.DataFrame, panel: pl.DataFrame, report: dict) -> None:
     check(report["daily_vs_monthly_return"]["corr"] > 0.99, "Daily and monthly returns disagree")
 
     e = j.filter(pl.col("eligible") & (pl.col("yyyymm") >= SAMPLE_START))
-    e = e.with_columns(spread_any=pl.coalesce("spread_quoted_21d", "bidaskhl_21d"))
+    e = e.with_columns(
+        spread_any=pl.coalesce("spread_quoted_21d", "bidaskhl_21d"),
+        # Usable by the cost rule: a quoted spread, or a high-low spread that rests
+        # on at least one range observed in the month (not only carried ranges).
+        spread_rule=pl.coalesce(
+            "spread_quoted_21d",
+            pl.when(pl.col("n_hl_observed_21d") > 0).then(pl.col("bidaskhl_21d"))),
+    )
     cols = ["rvol_21d", "rvol_252d", "beta_252d", "dolvol_126d", "spread_quoted_21d",
-            "bidaskhl_21d", "spread_any"]
+            "bidaskhl_21d", "spread_any", "spread_rule"]
     cov = lambda g: {c: {"n": round(g[c].is_not_null().mean(), 4),
                          "me": round(g.filter(pl.col(c).is_not_null())["me"].sum() / g["me"].sum(), 4)}
                      for c in cols}
@@ -496,11 +688,8 @@ def main() -> None:
     ff = read_french_daily(report)
     convert_daily(report)
 
-    # NASDAQ flag of each stock-month, as in step 3 (exchange where the volume traded).
-    active = (pl.col("tradingstatusflg") == "A").fill_null(False)
-    exch = pl.when(active).then(pl.col("primaryexch")).otherwise(pl.col("primaryexch_last_active"))
-    nasdaq = panel.select("permno", pl.col("yyyymm").alias("ym"),
-                          (exch == "Q").fill_null(False).alias("is_nasdaq"))
+    # Exchange history, to apply the NASDAQ volume adjustment day by day.
+    sec = read_exchange_history(report)
 
     permnos = pl.scan_parquet(DAILY_MIN).select("permno").unique().collect()["permno"].sort()
     report["daily_stocks"] = permnos.len()
@@ -510,16 +699,17 @@ def main() -> None:
     for i in range(0, permnos.len(), step):
         lo, hi = permnos[i], permnos[min(i + step, permnos.len()) - 1]
         d = pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_between(lo, hi)).collect()
-        parts.append(month_sums(prepare_batch(d, ff, nasdaq, counts)))
+        parts.append(month_sums(prepare_batch(d, ff, sec, counts)))
     report["daily_counts"] = counts
     sums = pl.concat(parts)
     check(sums.select("permno", "ym").is_unique().all(), "A stock-month in two batches")
     out = window_stats(sums)
     report["rows"] = out.height
 
-    check_direct(out, ff, nasdaq, report)
+    check_direct(out, ff, sec, report)
     checks(out, panel, report)
-    out = out.drop("ret_cmp", "n_ret_raw")
+    out = out.drop("ret_cmp", "n_ret_raw", "n_long_gap", "s_vol", "s_vol_adj", "n_nasdaq_days",
+                   "n_exch_days")
     report["inputs"][DAILY_MIN.name] = sha256(DAILY_MIN)
     publish({PROCESSED / "crsp_daily_agg.parquet": out}, report, PROCESSED / "crsp_daily_agg_report.json")
     print(f"crsp_daily_agg: {counts['rows']:,} daily rows -> {out.height:,} stock-months. Report saved.")

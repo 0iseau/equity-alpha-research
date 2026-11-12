@@ -1,0 +1,911 @@
+# Project journal: what was done, why, and how to defend it
+
+Written on 2026-11-12. Purpose: a single guide for **writing the report**, where
+every step and every choice must be explained and justified. It consolidates the
+history that used to sit in the context brief (`../CLAUDE.md`), in
+`CleaningSpec.md` and in the audit packs.
+
+How to read it:
+
+- This journal gives, for each step: the goal, what was done, where the method
+  comes from, the deviations and their reasons, the key figures, what the audit
+  found, and the limits to disclose.
+- **`CleaningSpec.md` stays the exhaustive technical record** (every check, every
+  counter). When a figure is quoted in the report, take it from the JSON check
+  report of the step in `data/processed/` (authoritative), not from memory.
+- Figures below are those of the current runs (section 6.4) unless a date is
+  given.
+- Rule for the future: each new step (signals, backtest, alphas...) adds a
+  section here when it is closed. `../CLAUDE.md` only keeps a one-line status.
+
+Contents: 1 Timeline · 2 Method and working rules · 3 Raw data · 4 Cleaning,
+step by step · 5 Data dictionary · 6 Audits across steps and reproducibility ·
+7 Decision register D1–D21 · 8 Backtest rules and their audit · 9 Limits to
+disclose · 10 Open items · 11 Incidents and lessons · 12 Sources to verify ·
+13 Map to the report sections
+
+---
+
+## 1. Timeline
+
+| Date | Event |
+|---|---|
+| 2026-10-14 | WRDS collection at the CEDIF (CRSP CIZ monthly and daily, security history, delistings, Compustat annual through CCM, link history, market indexes). Documented in `data/raw/manifest.json` (sizes, SHA-256). |
+| 2026-10-22 | FRED / ALFRED collection checked (`scripts/data_download/download_public_data.py`, standard library only). |
+| before 2026-11-04 | First attempt: a market-data audit (`src/audit_market_data.py`, tests, commit `ed8bc04`), developed with ChatGPT ("Astra") as developer. |
+| 2026-11-04 | **Restart** (commit `eda4453`): the old audit is abandoned (still in Git). `ProjectWorkflow.md` written. Roles change: **Claude develops, Astra only audits.** |
+| 2026-11-11 | Old scripts `data_cleaning.py` and `monthly_repetitions.py` and their outputs deleted; cleaning restarts from zero under `CleaningSpec.md` (JKP and Tidy Finance as references). Steps 1 to 10 implemented and audited one by one in the day. Scripts moved to `scripts/data_download/` and `scripts/data_cleaning/`. Repository switched to English. Git incident (section 11). |
+| 2026-11-12 | Step 9 audit handled. Whole chain rerun from raw files, reproducibility defect fixed. Final audit of the cleaning, alignment on the references, counter-audit. Backtest rules D12–D21 validated by Danny; `ret_d1` added. Astra's audit of the backtest rules (verdict "to review", no defect in the cleaned data) handled; final rules validated by Danny (section 8.4). **Cleaning closed.** |
+| 2026-11-13 (evening) | Deadline of the project. |
+| 16 Nov, 23 Nov, 7 Dec 2026 | Project presentation sessions. |
+
+What the first attempt had established (still valid, useful for the data
+section of the report):
+
+- the monthly CRSP CIZ file has one row per distribution event, not per
+  stock-month; on repeated keys, price, return, market cap and volume are never
+  in conflict (0 conflict);
+- classification of repeated stock-months: 50,590 "distinct events only", 3
+  "exact copies only", and 6,144 to review (3,333 where non-event fields differ,
+  mostly name, ticker and NASD ids changing inside the month; 2,811 where the
+  distribution count could not be reconciled). Step 1 settles all of them: the
+  stock-level fields are never in conflict, and the events go to a separate
+  table.
+
+## 2. Method and working rules
+
+### 2.1 References and their hierarchy
+
+- **JKP**: Jensen, Kelly and Pedersen (2023), *Is There a Replication Crisis in
+  Finance?*, JF. Python code `bkelly-lab/jkp-data`, local read-only clone at
+  commit `b5695ea` (2026-11-10), files `src/jkp/data/main.py` and
+  `aux_functions.py`. It reads the CRSP **CIZ** format, like our files.
+- **TF**: Tidy Finance with Python, local clone at commit `4f915a9`
+  (2026-09-14), chapters `wrds-crsp-and-compustat`, `value-and-bivariate-sorts`,
+  `replicating-fama-and-french-factors`. Also CIZ.
+- **Course**: Goyal's slides, lecture 1 (strategies) and lecture 3 (trading
+  costs).
+
+Rule: **JKP for the rigour of definitions, TF for the simplicity of the
+implementation, the course wins in case of conflict.** Each step names the
+function it reuses and justifies every deviation. Reference code is read, never
+executed.
+
+Why this is a good argument in the report: we did not invent a cleaning
+procedure. Each choice is either a published convention or a deviation with a
+stated reason and a measured effect.
+
+### 2.2 Principles (non-negotiable)
+
+1. **No look-ahead.** Each datum has an availability rule: annual accounts 6
+   months after `datadate`; market data known at the close and tradable the next
+   period; links and security attributes only inside their validity interval;
+   macro data only through ALFRED vintages.
+2. **No survivorship bias.** Dead stocks are kept and delisting returns are
+   included.
+3. **Missing stays missing.** Zero is not missing. Documented exceptions only
+   (−30 % delisting imputation D3; JKP book-equity formula; high-low range
+   carried forward).
+4. **Fail closed.** An unexpected schema, value, key or duplicate stops the
+   script. Unusual values are flagged, not removed.
+5. **Raw data are immutable**; outputs are written atomically (temporary file,
+   then replace) and only after a complete run.
+6. **Traceability.** Every step writes a JSON report with a run id and the
+   SHA-256 of inputs and outputs; every script reads its inputs only if their
+   hash matches the report of the previous step (`utils.read_verified`,
+   `read_raw_verified`).
+7. **Statistical discipline.** Rules are fixed before results are seen; the
+   strategy is frozen before a single final out-of-sample test.
+8. **Licences.** WRDS data are never published; they are ignored by Git.
+
+### 2.3 Development and audit process
+
+- Claude develops; ChatGPT ("Astra") audits and modifies nothing.
+- Each step ends with an **audit pack** (`audit/stepN_*.md`, Git-ignored, in
+  French): goal, files, assumptions, commands to reproduce, control figures,
+  limits, open questions. Astra's reports are in `../Workspace/output/`.
+- Audit findings are judged on their merits before being applied.
+- **Stopping rule**: one full audit per step, then corrections; the corrections
+  are checked during the audit of the next step. Blocking findings and cheap
+  important ones are fixed; the rest is documented.
+
+Audit trail (for the report's "validation" paragraph):
+
+| Step | Astra verdict | Outcome |
+|---|---|---|
+| 1–2 | "To correct", then counter-review of v2 | v3: trading breaks give a missing return (D9), no zero filling (D10). Closed. |
+| 3 | Findings 1–5 | NASDAQ volume in delisting months, counters, execution flags. Closed. |
+| 4 | "To correct" (1 blocking) | `me_cap` missing when `me` is missing; stronger French check; fail-closed downloader. Closed. |
+| 5 | "Validated with reservations" | Stock-by-stock lead check, calendar per factor, verified read of the French ZIP files. Closed. |
+| 6 | "Validated with reservations" | Second-route link check, minimum coverage per month. Closed. |
+| 7 | "Validated with reservations" | Hand-made book-equity test, second writing of the formula, null-safe checks. Closed. |
+| 8 | "To correct" (1 blocking) | Check findings fixed; blocking finding (restatements) not fixable with our data → decision D12. Closed. |
+| 9 | "To correct" (2 blocking) | Exchange of the day; 14-day rule from the last valid price; observed-range counter. Closed 2026-11-12. |
+| Final audit | "To correct" (1 blocking) | 10 findings, all handled (section 6.1). 15 of 15 files reproduced. |
+| Counter-audit | "Validated with reservations" | `ret_signal_ok`; ten rules proposed (section 8.1). |
+| Backtest rules | "To review" (4 blocking) | **Received, not handled yet** (section 8.3). |
+
+## 3. Raw data
+
+All in `data/raw/` (local, Git-ignored, never modified).
+
+| File | Content and remarks |
+|---|---|
+| `crsp_ciz_monthly_stock.csv` (1.7 GB) | CRSP CIZ monthly, one row per distribution event. Cap and shares in thousands. |
+| `crsp_ciz_daily_stock.csv` (22 GB) | Daily prices, returns, volume, bid/ask, high/low. No daily open. |
+| `crsp_ciz_security_history.csv` | Dated attributes (share type, security type, exchange, US incorporation, trading status). 191,048 rows, 40,518 PERMNOs; intervals never overlap and have no gap. **No `conditionaltype`.** |
+| `crsp_ciz_delistings.csv` | Delisting returns and reasons. Starts on 1950-05-06. |
+| `ccm_fundamentals_annual.csv` | Compustat annual merged by WRDS with the CCM links (already `INDL`, `STD`, `C`, `D`). 21 items; no `txdb`, `itcb`. |
+| `ccm_link_history.csv` | GVKEY–PERMNO links with dates; `LINKENDDT = 'E'` means still open. |
+| `crsp_ciz_monthly_market_indexes.csv` | VW, EW and S&P, 1926-01 to 2025-12 (used as a check only). |
+| `french/` | Ken French: NYSE ME breakpoints, FF3 with RF, FF5, momentum, daily factors. Vintage CRSP 202609, with a manifest. The downloader refuses to overwrite if the online file differs. |
+| `fred/`, `public/` | FRED and ALFRED: VIX, BAA10Y, T10Y3M, UNRATE, INDPRO, CPI, NFCI, capped at 2025-12-31. |
+
+Points to state in the report:
+
+- **Sample**: the cleaned data keep the full CRSP history (1930-01 to 2025-12);
+  the analysis sample is 1963–2025 (course convention, Compustat coverage, FF5
+  from 1963-07).
+- **Macro data are candidates only.** Full ALFRED archives really exist only
+  since 2014 for the six main series; a `*_latest` file must never be used as a
+  historical information set; one VIX observation dated 2024-09-02 is in
+  quarantine. BAA10Y (Moody's) cannot be redistributed. No cleaned table uses
+  FRED data so far.
+- **Missing**: q-factors (Hou-Xue-Zhang, global-q.org), needed for the alphas;
+  the commission series of Jones (2002), needed by rule D15.
+
+## 4. Cleaning, step by step
+
+Common conventions: Parquet outputs in `data/processed/`; time key `eom`
+(calendar month end), `MthCalDt` kept as `date`; native units kept, except
+market equity `me` in USD millions; full history kept.
+
+Pipeline: step 1 → `crsp_monthly` → step 3 → `crsp_universe` → step 4 →
+`crsp_panel` → step 5 → `crsp_panel_exc` → step 8 → **`crsp_panel_acc`** (final
+monthly panel). Side tables: `ccm_links` (6), `compustat_annual` (7),
+`acc_public` (8), `crsp_daily_agg` (9), `ff_factors_monthly` (5),
+`nyse_cutoffs` (4).
+
+### Steps 1 and 2 — Monthly panel and delisting returns
+
+Script `scripts/data_cleaning/1_crsp_monthly.py`. Outputs `crsp_monthly.parquet`,
+`crsp_distributions.parquet`, `crsp_d9_reconciliation.csv`.
+
+**Goal.** One row per stock-month with a total return that includes the
+delisting return, once and only once.
+
+**What was done and why.**
+
+- The raw file has one row per distribution event; stock-level fields are
+  identical inside a month, so the panel is deduplicated and the 1,089,403
+  events go to a separate table. 5,276,434 raw rows → 5,210,620 stock-months,
+  40,437 stocks, 1930-01 to 2025-12.
+- Delistings are joined on `(permno, month)` and compounded:
+  `(1 + ret)(1 + delret) − 1`, unless the CRSP flag is A, P or V (JKP
+  `prepare_crsp_sf`). Why: without delisting returns, the strategy would look
+  better than it was (Shumway, 1997), especially for small, distressed stocks.
+- **D3**: a performance delisting without a return gets −30 % (JKP, after
+  Shumway): 2,900 imputations. Sensitivity planned: −55 % for NASDAQ (Shumway
+  and Warther, 1999; 2,094 cases).
+- `ret_status` documents how each return was built (`crsp`,
+  `crsp_plus_delret[_imputed]`, `daily_plus_delret[_imputed]`,
+  `crsp_partial_delisting`, and four `missing_*` reasons). `ret_crsp` and
+  `delret_raw` keep the raw values.
+
+**Deviations from the references, each justified.**
+
+- **`me = MthCap / 1000`** instead of price × shares (JKP): in 180 rows the last
+  price is older than the share count, and only `MthCap` uses the shares at the
+  price date. All gaps are explained by this or by rounding.
+- **Volume in shares**: JKP multiplies by 100, but in our export the monthly
+  volume is exactly the sum of the daily volumes.
+- **D9 — 274 delisting months added.** These stocks delist in the month after
+  their last CRSP row; the JKP join would lose their delisting return. The added
+  row's return compounds the daily returns up to the delisting with `delret`.
+  If CRSP did not link a price to the previous one (a "trading break"), the part
+  before the delisting is unknown and the return stays missing. Result: 244
+  returns rebuilt (197 observed `delret`, 47 imputed), 30 missing (29 breaks).
+  Reference cases: PERMNO 65788 (−22.73 %) and 12964 (−79.82 %).
+- **D10 — no `ret = 0`.** JKP replaces some missing parts by 0. Here an unknown
+  part makes the return missing, with the reason. A missing value is not a zero.
+- `me_company` (all share classes) comes with `me_company_complete` (1,393
+  partial company-months).
+
+**Key checks.** Months without delisting keep `ret` exactly equal to `MthRet`.
+The 29,509 delistings are all linked to a month. 236 months carry a delisting
+flag without a record, all in 1949 or before (the file starts in 1950). 83,884
+final returns are missing (83,409 because CRSP gives none). The value-weighted
+return of all stocks follows the CRSP index `vwretd` (correlation 0.99978 over
+1,151 months). 732 returns above +300 % are flagged, not removed.
+
+**Later additions** (final audit): flag V (a part of the delisting
+distributions is unknown) gets its own status `crsp_partial_delisting` (200
+rows); delisting amounts can be known after the month (`delamtdt > eom`: 4,811
+rows), see `ret_signal_ok` in section 6.3.
+
+**Limit to disclose.** The delisting return is the holding return of the
+position, assigned to the delisting month (CRSP and JKP convention). It can rest
+on an amount paid later (median 2 days after the month end, 259 days at the
+90th percentile).
+
+### Step 3 — Eligible universe
+
+Script `3_crsp_universe.py`. Output `crsp_universe.parquet` (whole panel with
+flags).
+
+**Goal.** Say which stocks a US long-only fund could buy at each formation
+date, with no survivorship bias and no look-ahead.
+
+**Filters** (TF, mapping of the old `shrcd 10/11`, `exchcd 1–3`):
+`sharetype = NS`, `securitytype = EQTY`, `securitysubtype = COM`,
+`issuertype ∈ {ACOR, CORP}` → flag `common`; `primaryexch ∈ {N, A, Q}` and
+`tradingstatusflg = A` → `exch_main`; `usincflg = Y` → `us_inc`.
+
+- **D1**: US incorporation required (TF; JKP does not). Reason: the mandate is
+  "US equities".
+- **D2**: our export has no `conditionaltype` (the field JKP and TF use to
+  isolate regular trading). Substitute: active trading status and main
+  exchange. Closer to TF than to JKP; the gap cannot be measured without a new
+  WRDS export. A limit to disclose.
+- `eligible` = `common`, `exch_main`, `us_inc`, `me` known, and **no delisting
+  in the month** (a stock delisted during month t cannot be bought at the end of
+  t).
+
+**Key adaptation, and the main argument of this step.** Eligibility is judged
+**at the formation date** (end of month t). The return of t+1 (`ret_lead1`) is
+then **always kept**, whatever happens to the stock in t+1. JKP and TF filter in
+the same month as the return: on our data this would drop the delisting month,
+because for 23,114 of 29,528 delistings the security-information interval ends
+before the month end. Among positions eligible in t, **22,948** have a
+delisting month in t+1 (22,673 with a numeric return): these are the returns a
+same-month filter would have lost.
+
+**Other content.** Historical `siccd`, `cusip` and `naics` from the security
+history (0 becomes missing); `ff49` industries from JKP's `Siccodes49.txt`
+(missing on 2.5 % of eligible rows; 94,997 rows); Gao-Ritter NASDAQ volume
+adjustment (JKP function copied); `dolvol`; execution helpers `prc_age_days`
+(3,737 eligible rows with a stale price, 1,158 by more than 7 days) and
+`zero_volume` (5,624 eligible rows). `eligible` is a universe filter: it does
+not guarantee execution.
+
+**Key figures.** 3,805,426 eligible stock-months. Since 1963: 1,963 to 7,462
+stocks a month (4,563 on average), at least 1,139 NYSE stocks. Filter funnel
+since 1963: 4,844,588 rows → `common` 3,782,727 → `exch_main` 3,717,129 →
+`us_inc` 3,466,247 → known `me` and no delisting 3,449,977. Unknown t+1 returns
+weigh 0.0097 % of eligible market equity a month on average. Value-weighted t+1
+return of eligible stocks against `vwretd`: correlation 0.99869 over 756 months
+(+0.03 % a month: the index also holds funds, ADRs and REITs).
+
+**Audit corrections.** NASDAQ volume adjustment in delisting months uses the
+exchange of the last active interval (9,043 rows; check case PERMNO 10003,
+1995-12). Final audit: `vol_exch_transfer` flags months where the stock changes
+side (NASDAQ or not); `vol_adj` and `dolvol` are then missing (2,297
+stock-months). **For costs, use `dolvol_21d` and `dolvol_126d` of step 9.**
+
+### Step 4 — NYSE breakpoints and size groups
+
+Script `4_crsp_size.py`. Outputs `nyse_cutoffs.parquet`, `crsp_panel.parquet`
+(adds `size_grp`, `me_cap`).
+
+**What was done** (JKP `nyse_size_cutoffs`, `classify_stocks_size_groups`):
+each month, percentiles 1, 20, 50, 80 of `me` among eligible NYSE stocks; groups
+nano (< p1), micro (p1–p20), small (p20–p50), large (p50–p80), mega (> p80).
+`me_cap = min(me, p80)` for capped weights.
+
+**Why NYSE breakpoints**: course convention and Fama-French practice; otherwise
+the thousands of tiny NASDAQ stocks would define the groups.
+
+**D7 — all sizes are kept.** The size group is a label. A group may be excluded
+later only by a rule on **costs and capacity, never on alpha alone** (Novy-Marx
+and Velikov, 2016; lecture 3), and results are shown for three universes (D19).
+
+**Key figures since 1963** (share of stocks / share of market equity): nano
+18.8 % / 0.3 %; micro 40.7 % / 2.7 %; small 20.5 % / 6.6 %; large 12.9 % /
+16.0 %; mega 7.2 % / 74.5 %. This table is the best justification for
+value weights and for the three universes: micro and nano caps are 60 % of the
+names and 3 % of the value.
+
+**Independent check against Ken French's breakpoints** (756 months): log
+correlations 0.998 (p20), 0.9996 (p50), 0.9998 (p80). Median gap of p50: 0.0 %
+(1963–79), −1.3 % (1980s), −3.4 % (1990–2019), −13.4 % (2020–25). French counts
+companies (share classes summed), JKP and we count securities: this explains
+most of 1990–2019 (−0.6 % by company). The 2020s gap may come from SPACs (a
+hypothesis). Choice: keep the JKP convention; no return is affected; about
+30,000 group assignments would change with the French breakpoints (0.18 % of
+market equity). Declared limit, possible robustness test.
+
+**Deviation.** JKP puts a month without breakpoints in "mega"; here an eligible
+stock without a group stops the script.
+
+### Step 5 — Excess returns and factor table
+
+Script `5_crsp_excess.py`. Outputs `ff_factors_monthly.parquet` (FF3, FF5 with
+its own `_ff5` columns, momentum, `risk_free`, in decimals) and
+`crsp_panel_exc.parquet` (adds `risk_free`, `ret_exc`, `ret_exc_lead1`).
+
+- `ret_exc = ret − rf` with our validated total return; `rf` from Ken French
+  (JKP uses CRSP `t30ret`, absent from our extract).
+- No row is dropped (TF drops missing excess returns).
+- Each model keeps its own factors: the FF5 market differs slightly from the FF3
+  one (at most 0.08 %, cause not established) and SMB is built differently. FF5
+  regressions start in 1963-07. Factors run to 2026-09; regressions stop at
+  2025-12.
+
+**Checks worth quoting.** Stock-by-stock timing: on 5,210,894 rows,
+`ret_exc_lead1` of t equals `ret_exc` of the same stock in t+1 (the test fails
+on 3.9 million rows if the wrong month's RF is used). **Market check: the
+value-weighted t+1 excess return of our eligible universe against Fama-French
+Mkt-RF has a correlation of 0.99999 over 755 months, mean absolute gap 0.009 %
+a month; shifted by one month the correlation is 0.04.** This single number
+validates universe, returns, delistings, weights and timing together.
+
+### Step 6 — CRSP–Compustat links
+
+Script `6_ccm_links.py`. Outputs `ccm_link_table.parquet` (32,306 links) and
+`ccm_links.parquet` (4,125,224 linked stock-months, key `permno`–`eom`).
+
+- **D5**: `LINKTYPE ∈ {LC, LU}` and `LINKPRIM ∈ {P, C}` (TF, more cautious than
+  JKP, which adds LS and ignores LINKPRIM). Reason: one company's accounts must
+  go to one primary security.
+- Validity tested on the CRSP row date (`MthCalDt`, or the delisting date on a
+  D9 row); with the calendar month end, 267 eligible links would be lost and 9
+  would point to another company.
+- No overlap by `permno` or by `gvkey`; zero duplicate key.
+
+**Coverage of eligible stock-months since 1963**: 93.3 % by count, **98.1 % by
+market equity** (1960s: 71.0 % / 92.6 %; from the 1990s: above 96 % / 97 %). By
+size: nano 88.5 %, micro 92.5 %, small 95.0 %, large 97.2 %, mega 98.5 %.
+
+**Left out by D5**: secondary share classes (flags J and N): 330 securities,
+30,763 stock-months, 1.75 % of market equity (3.3 % in 2025-11). They stay in
+the panel with returns and price signals, without accounting data. LS links: 18
+securities, 0.05 %.
+
+**Checks.** Second route (last link started before the date, not ended) gives
+exactly the same table. Every month since 1963 has more than 80 % of market
+equity linked (lowest 88.1 %, 1963-02). The 343,569 rows of the WRDS merge all
+fall inside a raw link (99.1 % inside a kept link).
+
+**Limits.** The link table is today's table (standard practice). 234 linked
+`gvkey` have no accounts in our extract.
+
+### Step 7 — Annual accounts and book equity
+
+Script `7_compustat_annual.py`. Output `compustat_annual.parquet`: 335,244
+fiscal years, 27,438 companies, one row per `gvkey × datadate`, 1950-06 to
+2026-09, items in USD millions.
+
+- 343,569 raw rows → 340,636 after removing the copies per linked PERMNO (2,933,
+  no conflict) → 335,244 in USD (**D6**: USD only, like TF; 5,377 CAD rows and
+  15 without currency removed).
+- **Book equity, JKP word for word**: `pstk_x = coalesce(pstkrv, pstkl, pstk)`;
+  `seq_x = coalesce(seq, ceq + pstk_x, at − lt)`;
+  `be_x = seq_x + txditc − pstk_x`, missing if ≤ 0. Inside the formula only, a
+  missing preferred stock or deferred tax counts as zero. `be_x` is positive on
+  297,865 rows (88.9 %), set to missing on 12,856 (≤ 0), missing on 24,523.
+- Negative `at`, `sale`, `che` set to missing (0, 143, 42 rows).
+- Header fields `costat`, `fic`, `ipodate` are dropped: they describe the
+  company as it is today (look-ahead).
+- No "last report per calendar year" rule (TF): `gvkey × fyear` is already
+  unique, and TF's rule would drop 632 transition fiscal years.
+
+**Checks.** Hand-computed book-equity table tested at every run; second writing
+of the formula on all rows; accounting identities; spot checks against annual
+reports (Apple 2020: equity 65,339, sales 274,515, net income 57,411; IBM
+2019).
+
+**Limits to disclose.**
+
+- **The extract is a CCM merge**: fiscal years closed before the listing are
+  absent (example: Google's 2002–2003 accounts). 7.8 % of eligible linked
+  stock-months (1.2 % of market equity) come before the first usable accounts.
+  These stocks keep returns and price signals. Side effect: less Compustat
+  backfill bias.
+- **Accounts are in today's state** (restatements included): see step 8, D12.
+- Without `txdb` and `itcb`, deferred taxes are missing on 56,279 fiscal years
+  and count as zero in `be_x` (JKP convention).
+- For signals: compare dates 12 months apart, not neighbouring rows (1,063
+  shorter and 2,026 longer intervals).
+
+### Step 8 — Availability of accounting data
+
+Script `8_accounting_availability.py`. Outputs `acc_public.parquet` (usable
+report per company and month, 4,048,344 rows) and **`crsp_panel_acc.parquet`**
+(final panel: adds `gvkey`, `acc_datadate`, `acc_age_months`). Accounting values
+stay in `compustat_annual.parquet` and are joined on `(gvkey, acc_datadate)`.
+
+**D4 — the rule.** A report is usable from the end of month `datadate + 6` until
+the next report becomes usable, or `datadate + 18` months at the latest; monthly
+update. Example: a fiscal year ending 31 December 2019 serves formations from
+the end of June 2020 to the end of May 2021.
+
+**Justification.** JKP's mechanism (`lag_to_public`, 18-month maximum age) with
+the **6-month lag of the course** instead of JKP's 4 (more cautious). Monthly
+update rather than once in June (Fama-French): it fits a monthly rebalancing and
+the course ("using most up-to-date data is preferable"). Value ratios will use
+the market equity of month t (JKP; Asness and Frazzini, 2013).
+
+**Deviations.** The "next report" is the next report in any currency: a newer
+non-USD report replaces the old one and nothing is available (58,116 linked
+rows). A duplicate stops the script (JKP keeps the first).
+
+**Checks, the heart of the no-look-ahead argument.**
+
+- Look-ahead test: on 3,710,004 rows with accounts, the report is always public
+  at the formation date; age between 6 and 18 months.
+- Second route (last public report of the company): zero difference on
+  4,125,224 rows.
+- **Truncation test**: hide all reports not yet public at T, rebuild, the past
+  must not change: zero difference at 1975-06, 1999-12 and 2015-03.
+- Negative tests: a 5-month lag is caught (323,608 rows), and so is the use of
+  the next report (296,024 rows). Hand-written reference cases run at every
+  execution.
+
+**Coverage at formation, eligible stock-months since 1963** (count / market
+equity): link 93.3 % / 98.1 %; usable report 85.5 % / 96.8 %; total assets
+84.2 % / 96.8 %; **book equity 81.3 % / 94.3 %**; two fiscal years 77.6 % /
+95.3 %. Book equity by size (count): nano 74.3 %, micro 77.2 %, small 85.2 %,
+large 91.1 %, mega 95.2 %. Only 2,030,962 eligible stock-months have book
+equity, sales, COGS, SG&A and interest together.
+
+**Blocking audit finding → decision D12.** Compustat gives today's values, with
+no filing date and no version history. A restated amount can enter a signal
+formed before the restatement. Example: Super Micro Computer (`gvkey` 176567):
+fiscal 2024 equity 5,417.2 in the table against 5,469.5 public in December
+2024; fiscal 2017 sales 2,484.9 (2019 restatement) against 2,529.9 announced.
+Apple 2009 sales: 42,905 after an amended filing, 36,537 first announced. This
+is the limit of standard Compustat with a fixed lag (JKP, TF, Fama-French, the
+course); fixing it needs a point-in-time database. **Not fixable with our
+data**: handled by rule D12 (section 7).
+
+### Step 9 — Monthly summaries of the daily file
+
+Script `9_crsp_daily_agg.py` (about 10 minutes without cache). Outputs
+`crsp_daily_min.parquet` (intermediate, 102 million rows) and
+`crsp_daily_agg.parquet` (4,891,218 stock-months, key `permno`–`yyyymm`):
+`rvol_21d`, `rvol_252d`, `beta_252d`, `dolvol_21d`, `dolvol_126d`,
+`spread_quoted_21d`, `bidaskhl_21d`, `n_hl_observed_21d`, `ret_d1`, and the
+observation counts.
+
+**D11 — reduced scope** (deadline): only what serves a signal or the cost
+model. Left out: 21-day maximum return, Amihud illiquidity, share of zero-trade
+days.
+
+**Method (JKP `prepare_daily`, `roll_apply_daily`, `bidask_hl`).** Windows of
+"21, 126, 252 days" are 1, 6 and 12 calendar months; minimum observations 15,
+60, 120; volatility is the standard deviation of daily excess returns; beta is
+cov / var against the market; delisting rows excluded. Deviations: market and
+risk-free from Ken French daily files (JKP builds its own); windows computed
+from monthly sums in one pass.
+
+**Spreads, the input of the cost model.**
+
+- Quoted spread `(ask − bid) / midpoint`, monthly mean over at least 10 valid
+  days (`ask > bid > 0`, spread ≤ 50 % of the midpoint; the cap removes 563,008
+  quotes).
+- Quoted spreads barely exist before the 1990s (coverage by market equity:
+  0.3 % in the 1960s, 7.5 % 1970s, 12.6 % 1980s, 85.9 % 1990s). Hence the
+  **Corwin-Schultz (2012) high-low estimator**, JKP code copied
+  (`bidaskhl_21d`, at least 11 daily estimates). Either spread: at least 99.9 %
+  of market equity in every decade.
+- On 2,183,967 stock-months with both, rank correlation 0.71, medians 1.30 %
+  quoted and 1.25 % high-low. **But high-low compresses the gaps across sizes**
+  (same stock-months, quoted / high-low): mega 0.056 % / 0.545 %, large 0.114 %
+  / 0.651 %, small 0.333 % / 0.927 %, micro 2.196 % / 1.657 %, nano 4.703 % /
+  2.948 %. It overstates large-cap costs and understates small-cap costs: the
+  reason for rule D14.
+- JKP carries the last valid range forward on days without a trade price;
+  `n_hl_observed_21d` counts the ranges really observed (51,018 stock-months
+  have an estimate with none). Usable spread (quoted, or high-low with observed
+  ranges): 99.1 % of eligible stock-months, 99.96 % of market equity.
+
+**`ret_d1`** (added 2026-11-12 for rule D13): CRSP return of the first trading
+day of the month (market calendar), missing if the stock has no return that
+day. 4,766,718 known values. Reference case: PERMNO 14593, August 2020,
+0.025198. Astra recomputed it from the raw CSV: 0 difference on all keys.
+
+**Checks.** Second route on 101 stocks (largest relative gap 1e-13). Daily
+returns compounded over the month equal the CRSP monthly return within 0.0001
+on 99.99998 % of 4,672,805 months. Value-weighted mean beta 1.01. Cross-step
+check with step 3: monthly adjusted volume equals the sum of daily ones on
+2,502,768 months, 0 difference. Coverage by market equity: 12-month volatility
+and beta 99.3 %, 6-month dollar volume 99.6 %, quoted spread 94.0 %. Median
+quoted spread by size: mega 0.06 %, large 0.13 %, small 0.58 %, micro 2.8 %,
+nano 8.5 %.
+
+**Audit corrections (two blocking).**
+
+- NASDAQ volume adjustment now uses the exchange of each day, not of the month
+  end. Reference case PERMNO 62500, March 2000: mean daily dollar volume
+  29,143,056 instead of 17,097,119. 1,636 one-month and 9,824 six-month values
+  changed.
+- The 14-day rule (a return whose previous price is older than 14 days is not
+  used) now measures the gap from the last row **with a price**. Reference case
+  PERMNO 37022, December 1978: daily volatility 1.05 % instead of 23.65 %. 40
+  returns dropped. A project rule: JKP's CRSP branch does not apply it.
+- A CRSP trading day missing from the French calendar now stops the script.
+
+### Step 10 — Extreme values
+
+No code. **No winsorisation** of returns in the cleaned data; extreme values are
+flagged, not removed. Characteristics become ranks at the signal step, which
+neutralises outliers without deleting them. JKP's 0.1 % / 99.9 % winsorisation
+for factor regressions is a choice for the alpha step.
+
+## 5. Data dictionary
+
+`resources/data_dictionary.csv`: one row per column of the seven cleaned tables
+(**148 columns**; 144 at the end of the cleaning, 146 after the final audit, 147
+with `ret_signal_ok`, 148 with `ret_d1`): meaning, unit,
+source, **availability** (`key`, `t`, `interval`, `acc_6m`, `t+1`, `after_t`,
+`today`) and **roles** (`identifier`, `universe`, `predictor`, `outcome`,
+`benchmark`, `execution_cost`, `weight`, `audit`).
+
+`scripts/data_cleaning/check_data_dictionary.py` stops if a column is missing or
+extra, or if a role does not fit the availability (a decision role needs `key`,
+`t`, `interval` or `acc_6m`; `t+1` and `outcome` always go together).
+
+Why it matters in the report: look-ahead is prevented by construction, not by
+care. Never used as inputs: `hdr_cusip` (`today`), `delamtdt`, `delnextdt`
+(`after_t`), `ret_lead1`, `ret_lead1_status`, `ret_exc_lead1` (`t+1`).
+Restricted use: `ret`, `retx`, `ret_exc` are predictors only where
+`ret_signal_ok` is true; `me_company` needs `me_company_complete`; `ticker` is
+not a key.
+
+## 6. Audits across steps and reproducibility
+
+### 6.1 Final audit of the cleaning (2026-11-12, "to correct", one blocking)
+
+Astra reran the eight scripts (15 of 15 data files identical) and rebuilt HML
+independently (2×3 sorts in June, 750 months): correlation **0.982** with the
+Fama-French HML, mean gap −1.9 basis points a month. Ten findings, all handled:
+monthly adjusted volume in exchange-transfer months (blocking,
+`vol_exch_transfer`); late delisting amounts (check that no stock is eligible
+again before the amount date); flag V status; FRED files restored byte for
+byte; size and modification time of large raw files rechecked before
+publishing; usable-spread coverage reported; `naics = 0` missing; checks no
+longer take their population from the object under test; stale passages dated;
+observed ranges counted only if accepted by the estimator.
+
+### 6.2 Alignment on the references (2026-11-12)
+
+For each problem found by the audits, the JKP and Tidy Finance code was
+searched (table "What the references do about the problems found" in
+`CleaningSpec.md`). Where a reference has a solution, our code follows it:
+explicit sort after every `.unique()` and before floating-point sums (JKP
+practice). Outputs unchanged byte for byte. **Ten problems have no solution in
+the references**: spread combination, restatements, funding of late delisting
+proceeds, unknown return of a held position, accounts missing before listing,
+secondary share classes, execution at the close, the 50 % cap on quoted
+spreads, NYSE breakpoints at the security level, the vintage of the French
+factors. They became the backtest rules (section 8).
+
+### 6.3 Counter-audit (2026-11-12, "validated with reservations")
+
+15 of 15 files reproduced from raw files without cache. One fix: a late
+delisting return could reach a signal through **another** security (15
+stock-months next to another eligible class of the same company; 3,103 next to
+an eligible stock of the same FF49 industry). New column **`ret_signal_ok`**
+(`del_flag = N`): `ret`, `retx` and `ret_exc` are predictors only on source
+rows where it is true, **before any lag, group, index or join to another
+stock**. The signal step must test that changing a delisting return after t
+changes no signal.
+
+Documented limits: size and modification time do not prove identical bytes
+across two reads; two runs at the same time are not supported; the direct check
+of step 9 is a sample of 101 stocks.
+
+### 6.4 Reproducibility and current runs
+
+A first full rerun showed six outputs changing between runs: in step 1 the
+product of daily returns of D9 rows was computed in an unfixed order
+(`unique()` does not keep row order); 77 rows differed at the 16th decimal.
+Fixed by sorting first. **Two full runs in a row now give 15 outputs identical
+byte for byte** (the chain took about 6 minutes on 2026-11-12; step 9 alone
+about 10 minutes when the daily file is converted again). Hashes of the seven
+WRDS files and the five French files rechecked on 2026-11-12.
+
+| Step | Script | Current run id |
+|---|---|---|
+| 1–2 | `1_crsp_monthly.py` | `591588b4ddfc` |
+| 3 | `3_crsp_universe.py` | `675782030a3a` |
+| 4 | `4_crsp_size.py` | `3a0b1171f186` |
+| 5 | `5_crsp_excess.py` | `f920bd39db56` |
+| 6 | `6_ccm_links.py` | `90aff624d621` |
+| 7 | `7_compustat_annual.py` | `a20b514d1dab` |
+| 8 | `8_accounting_availability.py` | `87be465f4640` |
+| 9 | `9_crsp_daily_agg.py` | `86a807cdfece` |
+
+Run ids quoted in older documents are superseded. Scripts run from `Project/`,
+one at a time, for example `python scripts/data_cleaning/4_crsp_size.py`.
+
+## 7. Decision register
+
+| ID | Decision | Justification | Alternative rejected |
+|---|---|---|---|
+| D1 | `usincflg = Y` | Mandate "US equities" (TF) | No filter (JKP) |
+| D2 | Substitute for the absent `conditionaltype`: active status and main exchange | Field not in our export; declared limit | New WRDS export |
+| D3 | −30 % for performance delistings without a return | JKP, after Shumway; sensitivity at −55 % for NASDAQ | No imputation (TF) |
+| D4 | Accounts usable 6 months after year end, at most 18 months, monthly update | Course lag (more cautious than JKP's 4), JKP mechanism | 4 months; June-only update |
+| D5 | Links LC/LU and P/C | One primary security per company (TF) | LC/LU/LS without LINKPRIM (JKP) |
+| D6 | Compustat in USD only | No currency conversion needed for US stocks | Conversion (JKP) |
+| D7 | Keep all sizes; exclude a group only by a cost and capacity rule fixed in advance | Never select on alpha; Novy-Marx and Velikov (2016) | Drop below NYSE p20 (FF) or nano only (JKP) |
+| D8 | FF49 industries in the data; coarser grouping for neutralisation, to fix at the signal step | — | SIC divisions (TF) |
+| D9 | Add the 274 missing delisting months | Otherwise delisting returns are lost | Lose them (JKP) |
+| D10 | No zero filling of unknown returns | Missing is not zero | `ret = 0` (JKP) |
+| D11 | Step 9 reduced to volatility, beta, dollar volume, spreads | Deadline; only what a signal or the cost model needs | Full JKP list |
+| D12 | Keep accounting signals despite restatements; never call the bias small; versions A and B | See below | Point-in-time data; no accounting signals |
+| D13–D21 | Backtest rules | Section 8.2 | Astra's proposals, section 8.1 |
+
+**Rule D12 in full.** The restatement bias cannot be measured with our data, so
+we never say it is negligible; we show that the conclusion does not depend on
+it, or we say that it does. Two versions fixed in advance, same tests: **A**,
+price signals only (momentum, volatility), not exposed, with a universe that
+does not depend on accounts; **B**, price and accounting signals. If A has a
+significant alpha, the conclusion holds without accounting signals, and B − A
+is the **observed gap** (not a bound: the sign of the restatement effect is
+unknown). If alpha appears only in B, the report says the result rests on
+exposed signals. Complements: a 12-month lag test (explores late filings, does
+not restore original values) and a verified reference on restated against
+as-first-reported data (Lyle, Siano and Yohn, 2024, to check).
+
+## 8. Backtest rules
+
+### 8.1 Astra's proposals for the ten unsolved problems
+
+Ranked by importance for the conclusion: execution (18.97 % of eligible
+formations have a stale price, a bid-ask average or no volume); spreads
+(36-month calibration of high-low on quoted); restatements (random ±10 %
+shocks); 50 % quote cap; unknown return of a held position (three scenarios);
+late delisting proceeds (receivable); accounts missing before listing (neutral
+rank); NYSE breakpoints; secondary classes; vintage of the French factors. Full
+table in `CleaningSpec.md`, "Rules proposed before the backtest".
+
+### 8.2 Rules validated by Danny (2026-11-12, before any result)
+
+Principle: **the main number already pays for realism.** Wherever a rule offers
+a choice, the main version takes the cautious option, so that the alpha is not
+followed by a list of excuses. A separate scenario is kept only where the choice
+can change the conclusion.
+
+| ID | Rule | Based on | Astra proposal not adopted |
+|---|---|---|---|
+| D13 | Signal at the close of t; trade at the close of the first trading day of t+1; the old portfolio is held that day. A stock bought earns `(1 + ret_lead1) / (1 + ret_d1) − 1`. No first-day return: order not executed, old position kept. Close-to-close shown as a comparison. | No signal and trade at the same close; Asparouhova, Bessembinder and Kalcheva (2013). No study prescribing a one-day lag was found. | Carry over 2 and 5 sessions, cancel horizon |
+| D14 | Quoted spread; else raw high-low if ranges were observed; else mean of the size group in t. Cost = half spread × absolute weight change. Sensitivity: high-low everywhere. | Chen and Velikov (2023) | 36-month calibration (too few mega-cap pairs before 1984) |
+| D15 | One-way commission added before May 1975, annual series of Jones (2002). **Series not yet in the project.** | Jones (2002) | — (new) |
+| D16 | Unknown return of a held position: −100 %. Count and weight reported (0.0015 % a month on average, value-weighted). | Pessimistic single rule | Three scenarios |
+| D17 | Delisting proceeds credited in the delisting month. Late amount dates are a declared limit. | JKP, TF, Shumway (1997) | Receivable scenario |
+| D18 | Missing signal: median rank and a missing flag; no accounting item filled; complete-case result shown. Same for secondary classes and stocks without accounts yet. | Gu, Kelly and Xiu (2020); Bryzgalova et al. (2024) | — |
+| D19 | Three universes fixed in advance: all sizes; above NYSE p20; cost rule D7. Value weights are the main weighting. | Hou, Xue and Zhang (2020); Avramov, Cheng and Metzker (2023) | — |
+| D20 | Alphas against the Ken French files and against factors rebuilt from our data. | Akey, Robertson and Simutin ("Noisy factors") | ±bp stress on premia |
+| D21 | Buffer: buy in the top 10 %, sell only outside the top 20 %. | Course; Novy-Marx and Velikov (2016) | — (new) |
+| D12 | Unchanged (A and B, 12-month lag test). | Lyle, Siano and Yohn (2024) | Random ±10 % shocks |
+
+Only **three comparisons** accompany the main number: A against B; one-day-lag
+execution against close-to-close; the three universes.
+
+Course cost model, to combine with these rules: turnover `Σ|Δw|` with weight
+drift; price impact per dollar traded `λ × sqrt(order / ADV)` with λ = 0.025 /
+0.015 / 0.010 (micro / small / large) and V0 = USD 100 million. The square root
+was lost in the text extract of the slides and confirmed in the original slide
+24 on 2026-11-12 (section 8.3).
+
+### 8.3 Astra's audit of these rules — handled on 2026-11-12 (decision in 8.4)
+
+Report: `../Workspace/output/2026-11-12_AUDIT_regles_backtest_pour_Claude.md`.
+Verdict: **"to review"**. **No defect in the cleaned data**: `ret_d1` recomputed
+from the raw CSV with 0 difference, 14 outputs equal to their recorded hashes.
+The cleaning is therefore validated; every finding is about the specification of
+the backtest.
+
+What was done: finding 9 fixed (six more `ret_d1` source cases checked at every
+run of step 9; dictionary role of `ret_d1` reduced to `audit`, with an explicit
+"not a predictor, not a cost, not a proof of execution" note). The square root
+of the course price-impact formula was confirmed in the original slide 24 and
+restored in the documents. For findings 1 to 8, an amendment is proposed for
+each rule in `CleaningSpec.md`, section "Audit of the backtest rules"; Danny
+validated them the same evening with two simplifications (section 8.4). After
+the fix, step 9 was rerun (run `86a807cdfece`): the six new cases pass and
+`crsp_daily_agg.parquet` has the same SHA-256 as before. The same section lists
+the source statements the audit corrected (Jones, Akey et al., Chen and Velikov,
+Shumway, Bryzgalova et al.).
+
+Summary of the findings:
+
+| # | Severity | Rule | Finding (summary) |
+|---|---|---|---|
+| 1 | Blocking | D13 | A known first-day return does not prove a closing trade nor that the stock could be bought: 662,223 eligible formations have a known `ret_d1` with a non-trade close or no volume; 1,275 have a delisting on or before day 1. Separate the valuation return from the execution test. |
+| 2 | Blocking | D13, D14, D19 | No participation cap and no price-impact rule on traded amounts. The impact formula in our brief lost the square root of the original slide (250 bp against 25 bp for micro caps in the slide example). |
+| 3 | Blocking | D19 / D7 | The cost rule D7 can still select winning groups after the fact if its alpha or break-even cost uses the whole 1963–2025 sample. The main portfolio among the three universes must be named before computing. |
+| 4 | Blocking for net results 1963–75 | D15 | The commission series is missing; zero until then would flatter exactly that period. Jones's "1 %" already includes the half spread: adding it to our spread would double count. Commissions do not vanish after May 1975. |
+| 5 | Important | D16 | Missing is not a final loss: of 879 months without an ordinary CRSP return after an eligible formation, 869 have a known return later. If −100 % is kept, call it a stress convention and define recoveries. |
+| 6 | Important | D17 | An ex post return is not always spendable cash: in a nano + micro value-weighted control portfolio, late terminal value reaches 0.444 % of capital in the worst month. |
+| 7 | Important | D14 | Raw high-low and the quote cap are not cautious for all sizes (before 1993, nano: 8.72 % quoted against 5.19 % high-low). Define the donor population of the group mean. |
+| 8 | Important | D12, D18, D20, D21 | Parameters still open: normalisation, weights, entries and exits, which factors to rebuild (FF3 minimum; RMW, CMA, MOM for FF5 and momentum), tie rules for the buffer. A stock with two price ranks of +1 and two missing accounting ranks scores +0.5. |
+| 9 | Minor | Step 9, dictionary | Add independent source cases for `ret_d1`; the role `execution_cost` and the note "as a predictor" blur the use of a lagged value. |
+
+Astra's source check (part C of the report) must be used before citing any
+paper in the report.
+
+### 8.4 Final backtest rules — validated by Danny on 2026-11-12 (evening)
+
+Danny validated the amendments of section 8.3 with two simplifications and two
+additions proposed by Claude. No signal, model or backtest result existed at
+that time. **These rules replace sections 8.2 and 8.3 where they differ.**
+
+Danny's requirement, which drives every choice below: not to end with concrete
+results followed by "this may be wrong because we assume...". No backtest is
+free of assumptions; the answer is that each assumption must be **standard in
+the literature, cautious, or measured**. A reservation that cannot be removed is
+turned into a number shown next to the main result, not into a warning.
+
+**Rules as they now stand.**
+
+| ID | Final rule | Why (argument for the report) |
+|---|---|---|
+| D13 (amended) | Signal with data up to the close of t. Orders (amounts) are frozen with the data of t and never replaced by the next candidate. An order is **filled** at the close of the first trading day of t+1 only if that day has a trade price (`prc_flag` = TR), a positive volume, and no delisting on or before it. Unfilled purchase: cash. Unfilled sale: position kept. The order expires at the end of that day. `ret_d1` only values the return; the fill flag is built from `crsp_daily_min` at the backtest step. | A known first-day return does not prove that a trade was possible: 662,223 eligible formations have one with a bid-ask close or no volume. Separating valuation from execution removes the objection "you could not have bought at that price". |
+| D22 (new) | **Capacity and price impact.** Constant nominal capital of USD 100 million (course). Impact per dollar traded = `λ × sqrt(order / ADV)`, λ = 0.025 (nano, micro), 0.015 (small), 0.010 (large, mega). ADV = the smaller of `dolvol_21d` and `dolvol_126d` at t, both required. An order is capped at 1 % of ADV. One stress test at 0.5 %. | Course formula (slide 24, with the square root) and course coefficients; nano takes the micro coefficient and mega the large one, for lack of a calibration. The smaller of two horizons avoids using a short burst of liquidity. The cap makes a stock that is too small simply not bought: capacity is paid inside the main number. |
+| D19 (amended) | **Two universes**, not three: all sizes (main), and above the NYSE 20th percentile. Value weights. The third universe (cost rule D7) is **dropped**. | The break-even rule of D7 used the alpha of the tested sample (a selection after the fact), and its replacement needed an arbitrary 10 % threshold. The order cap of D22 already does the job stock by stock, with no extra parameter. D7 remains true for the data: no size group is removed at the cleaning stage. |
+| D15 (amended) | Commissions = the commission series of Jones (2002) **alone**, added to our spread (his "1 %" already contains the half spread). **No net result is shown on a period without commissions**: if the series is not in the project, the net result starts after May 1975 and is labelled as such. | Zero commissions would flatter exactly the years the rule is meant to correct. |
+| D16 (wording) | Unknown return of a position held: −100 %, named **"full write-off convention"**, applied once to the lot held, no recovery booked; the mechanical end of the sample is excluded. Weight, effect in basis points and largest case are reported. | It is a stress convention, not a fact: 869 of 879 ordinary cases have a known return later. The weight is 0.0015 % a month on average on a value-weighted universe. |
+| D17 (wording) | Delisting proceeds credited in the delisting month (unchanged). The stock of late proceeds on the positions really held is reported. The rule is not called cautious. | CRSP and JKP convention for the holding return; the cash may come later. |
+| D14 (precision) | Quoted spread; else raw high-low with observed ranges; else the arithmetic mean over the eligible stocks of the same size group in t that have one of these two spreads (no imputed value as a donor). Cost = half spread × amount filled. Turnover is reported by source of cost. | Simple and reproducible. Not cautious for every size (before 1993, nano: 8.72 % quoted against 5.19 % high-low), so we do not say it is. |
+| D18, D20, D21 (parameters) | Ranks scaled to [−1, 1]; missing → 0 after ranking, with a flag; fixed signal weights, not rescaled by stock; a stock with no signal at all cannot start a purchase. Buffer 10 % / 20 % on the book really held, ties by PERMNO. Rebuilt factors: market, SMB, HML, plus RMW, CMA and momentum if FF5 or momentum alphas are shown. t-statistics with a fixed HAC lag of 6 months. | Frozen before any result, so that no parameter can be tuned on the outcome. |
+| D12 (unchanged) | Versions A (price signals only) and B (price and accounting signals), 12-month lag test. | See section 7. |
+| D23 (new) | **How the conclusion is stated.** (1) **Version A is the main conclusion**; version B is a complement. (2) The main sample is 1963–2025 (course); the sub-period **1993–2025 is shown next to it**. | (1) Version A is not exposed to Compustat restatements, so that reservation cannot touch the conclusion. (2) From 1993 quoted spreads are observed and fixed commissions are gone: the reservations "old costs are estimated" and "commissions" become a measured comparison instead of a warning. |
+
+**Comparisons shown next to the main number**: A against B; one-day-lag
+execution against close-to-close; two universes; 1963–2025 against 1993–2025.
+On the main portfolio, one cost breakdown: gross → half spread → commissions →
+impact → net, with turnover submitted and filled and the share of cash.
+
+**Risk accepted in advance.** Version A, net of costs, on 1993–2025 may show no
+alpha. That would be the conclusion of the report, not a reservation.
+
+**Reservations that remain whatever we do** (stated once, plainly): accounts in
+today's state (version B only); costs before 1993 estimated, not observed; no
+closing-auction data, so a closing trade price is a proxy for the execution
+price.
+
+**Still needed before the backtest**: the Jones (2002) commission series
+(otherwise the net result starts after May 1975); the q and q5 factors; the
+choice of the signals and the exact content of versions A and B.
+
+### 8.5 Signals: list and construction plan (2026-11-12, not built yet)
+
+Full text: `SignalSpec.md`. List: `resources/signal_list.csv`, produced and
+checked by `scripts/signals/0_signal_list.py`.
+
+**Danny's requirement.** The list must be one that is historically known to hold
+the information needed to find alpha, either from the literature or from an
+industry adviser's brief. Nothing arbitrary.
+
+**The adviser's brief** (systematic equity stock selection): several families of
+signals (momentum, value, quality, earnings revisions, volatility, possibly
+alternative data); compare a traditional multi-factor model with machine
+learning (XGBoost, LightGBM, neural networks); neutralise sector and factor
+exposures; judge out of sample after trading costs.
+
+**Selection rule (the argument for the report).** A characteristic of the JKP
+library (the census of published signals, whose code we already follow) is kept
+if and only if every input of its JKP formula exists in our cleaned tables. The
+only criterion is data availability; a fallback is accepted only if it is a
+Compustat identity; an item absent from our extract is never treated as zero.
+The list was fixed before any signal or return was computed.
+
+**Result: 176 of the 404 JKP characteristics.** Version A (price and trading
+data only, rule D12): 42 (momentum 13, short-term reversal 1, long-term reversal
+12, seasonality 5, low risk 3, size and liquidity 4, equity net payout 4).
+Version B adds 134 accounting characteristics (investment 37, financial strength
+27, fundamental momentum 16, profitability 15, issuance 14, value 13, size 5,
+operating efficiency 4, low risk 2, earnings quality 1).
+
+**What we cannot build, to state plainly**: earnings revisions (no analyst
+forecasts) and alternative data, two families the adviser names; accruals, cash
+flows, R&D and quality composites (our Compustat extract has 21 items);
+quarterly characteristics; most low-risk and trading characteristics (step 9
+reduced, D11).
+
+**Construction plan**: three scripts copying the JKP functions (price signals;
+accounting signals on a complete monthly grid per company; panel with
+market-scaled characteristics and ranks in [-1, 1], missing = 0 with a flag),
+with a truncation test, a delisting-invariance test, hand-written reference
+cases and negative tests.
+
+**Method** (Gu, Kelly and Xiu, 2020): target `ret_exc_lead1`; equal-weight
+average of signed ranks, penalised linear regression, gradient-boosted trees;
+training 1963-1980, validation 1981-1992, test 1993-2025 (GKX proportions; the
+test period is the sub-period of D23).
+
+**Status**: audit of the list and the plan requested from Astra
+(`audit/AUDIT_signaux_liste_et_plan_pour_Astra.md`). Open points: sector
+neutrality and industry grid (D8), `chcsho_*`, sign of each characteristic,
+construction check against the Ken French factors. The exclusions were judged
+by reading the JKP code, not by an exhaustive automatic parse: the audit must
+check the list in both directions.
+
+## 9. Limits to disclose in the report
+
+1. Compustat accounts are in today's state; version B is exposed to
+   restatements (D12). Example: Super Micro Computer.
+2. Fiscal years closed before the listing are absent from our extract (7.8 % of
+   eligible linked stock-months, 1.2 % of market equity).
+3. No `conditionaltype`: the "regular trading" filter is a substitute (D2).
+4. Costs before the 1990s are estimated (high-low), not observed; commissions
+   before 1975 are not in the data yet (D15).
+5. The 50 % cap on quoted spreads; the high-low estimator compresses size gaps.
+6. NYSE breakpoints at the security level differ from Ken French's (companies).
+7. Secondary share classes have no accounting data (1.75 % of market equity).
+8. Delisting returns can rest on amounts paid later; −30 % imputation (D3).
+9. The link table and the French factor files are today's vintages.
+10. `eligible` does not guarantee execution: stale prices, zero volume.
+11. The backtest rules rest on abstracts and summaries read on 2026-11-12:
+    every quoted figure must be checked in the paper.
+
+## 10. Open items (2026-11-12)
+
+1. Backtest rules: **done**, final rules in section 8.4 (validated by Danny on
+   2026-11-12). Cleaning: **closed** (step 9 rerun `86a807cdfece`, output
+   identical byte for byte).
+2. Obtain and check the Jones (2002) commission series; q and q5 factors from
+   global-q.org.
+3. Signal rules to freeze before any result: industry grouping (D8) and an
+   "unknown industry" bucket, minimum coverage, momentum window and skipped
+   month, security or company market equity for book-to-market, 12-month
+   comparisons on the same `gvkey`, exact content of versions A and B,
+   sensitivity tests (D3 at −55 %, 12-month lag, French breakpoints, costs).
+4. **No signal is chosen yet.** Danny asked not to start the signals before
+   validating the rest.
+5. Then: signals → portfolios → backtest with costs → alphas (CAPM, FF3, FF5,
+   q, q5; t-tests, GRS) → robustness → freeze → single out-of-sample test →
+   report (20 pages) and slides.
+6. Housekeeping: `utils.py` lives in `scripts/data_cleaning/` (a future
+   signals or backtest folder must import it from there or move it up);
+   uncommitted changes on branch `project/data-cleaning-validation`.
+
+## 11. Incidents and lessons
+
+- **Git incident (2026-11-11).** Switching to the old local `main` (commit
+  `ed8bc04`, which tracked `data/raw/manifest.json` and `data/raw/fred/`) and
+  updating it made Git overwrite then delete these ignored files. Restored on
+  2026-11-12 from `ed8bc04`; the six FRED files had to be restored a second
+  time byte for byte (`git cat-file blob`) because of Windows line endings.
+  WRDS and French hashes rechecked: intact. **Rule: before any `git checkout`
+  or `git switch`, check with `git ls-tree` that the target branch tracks no
+  file under `data/`.** Other files of the old `main` (`data/preview/`, `src/`,
+  `tests/`, `results/`) were not restored: abandoned at the restart.
+- **Reproducibility**: order-sensitive floating-point computations must be
+  preceded by an explicit sort (section 6.4).
+- **Checks must not take their population from the object under test** (final
+  audit, finding 8).
+- **A successful audit is not evidence of performance**, and a successful
+  download does not certify that a series suits a backtest.
+
+## 12. Sources to verify before citing
+
+Read only as abstracts or summaries so far: Corwin and Schultz (2012); Shumway
+(1997) (the −30 % figure is not confirmed); Shumway and Warther (1999); Fama
+and French (2008); Gompers, Ishii and Metrick (2010); Holden and Jacobsen
+(2014); Lyle, Siano and Yohn (2024); Freyberger et al. (NBER WP 30761);
+Asparouhova, Bessembinder and Kalcheva (2013); Chen and Velikov (2023); Jones
+(2002); Novy-Marx and Velikov (2016); Frazzini, Israel and Moskowitz (2018);
+Hou, Xue and Zhang (2020); Avramov, Cheng and Metzker (2023); Gu, Kelly and Xiu
+(2020); Bryzgalova, Lerner, Lettau and Pelger (2024); Akey, Robertson and
+Simutin ("Noisy factors"); Asness and Frazzini (2013); Abdi and Ranaldo (2017);
+Gao and Ritter (NASDAQ volume). Used in full through their code: Jensen, Kelly
+and Pedersen (2023); Tidy Finance. Course example: Cooper, Gulen and Schill
+(2008).
+
+## 13. Map to the report sections
+
+| Report section | Material |
+|---|---|
+| Data | Section 3; steps 1–3 (sample, universe, delistings); funnel and size table (steps 3–4) |
+| Sample construction and biases | Steps 1–3 (survivorship), step 8 (look-ahead tests), section 5 |
+| Variables | Steps 5, 7, 8, 9; data dictionary |
+| Validation of the data | Market check 0.99999 (step 5); French breakpoints (step 4); HML 0.982 (6.1); reproducibility (6.4); audit trail (2.3) |
+| Portfolio construction and costs | Section 8.2; spreads of step 9; size groups of step 4 |
+| Factor models and alphas | Step 5 (factor table), D20 |
+| Robustness | D3 at −55 %, 12-month lag, French breakpoints, three universes, A against B, execution lag |
+| Limitations | Section 9 |
+| Appendix | Decision register (section 7); `CleaningSpec.md` |

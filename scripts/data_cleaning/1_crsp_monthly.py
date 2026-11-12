@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import polars as pl
 
-from utils import PROCESSED, RAW, CheckError, check, publish, sha256
+from utils import (PROCESSED, RAW, CheckError, check, check_unchanged, file_stamps, publish,
+                   sha256)
 
 SRC = RAW / "crsp_ciz_monthly_stock.csv"
 DAILY = RAW / "crsp_ciz_daily_stock.csv"
@@ -204,7 +205,8 @@ def pre_delisting_returns(d9: pl.DataFrame, report: dict) -> pl.DataFrame:
     # The daily file repeats some days (exact copies on these columns): keep one.
     # Two different rows for the same day stop the script.
     n_raw = daily.height
-    daily = daily.unique()
+    # JKP practice: unique() does not keep the row order, so sort right after it.
+    daily = daily.unique().sort("PERMNO", "DlyCalDt")
     check(daily.select("PERMNO", "DlyCalDt").is_duplicated().sum() == 0,
           "Conflicting rows for the same permno-day in daily rows of D9 stocks")
     report["d9_daily_exact_copies_dropped"] = n_raw - daily.height
@@ -217,8 +219,11 @@ def pre_delisting_returns(d9: pl.DataFrame, report: dict) -> pl.DataFrame:
         .join(d9.select("PERMNO", "last_date", "delistingdt"), on="PERMNO")
         .filter((pl.col("DlyCalDt") > pl.col("last_date"))
                 & (pl.col("DlyCalDt") <= pl.col("delistingdt")))
+        # Fixed order: a product of floats depends on the order of its terms, and
+        # unique() above does not keep the row order.
+        .sort("PERMNO", "DlyCalDt")
     )
-    pre = window.group_by("PERMNO").agg(
+    pre = window.group_by("PERMNO", maintain_order=True).agg(
         pl.len().alias("window_days"),
         ret.is_not_null().sum().alias("window_days_with_ret"),
         (pl.col("DlyPrc").is_not_null() & ret.is_null()).any().alias("pre_delist_break"),
@@ -425,7 +430,11 @@ def adjust_delisting(panel: pl.DataFrame, dl: pl.DataFrame, report: dict) -> pl.
         .when(known_base & known_del)
         .then((pl.col("ret_base") + 1) * (pl.col("delret") + 1) - 1)
         .otherwise(None),
-        ret_status=pl.when(~delist_month & known_base).then(pl.lit("crsp"))
+        # Flag V: CRSP says a part of the delisting distributions is unknown. The
+        # return is kept as delivered (JKP), but its status says it is partial.
+        ret_status=pl.when(~delist_month & known_base & (pl.col("MthDelFlg") == "V").fill_null(False))
+        .then(pl.lit("crsp_partial_delisting"))
+        .when(~delist_month & known_base).then(pl.lit("crsp"))
         .when(~delist_month).then(pl.lit("missing_crsp"))
         .when(~known_base).then(pl.lit("missing_pre_delisting"))
         .when(~known_del & has_record).then(pl.lit("missing_delret"))
@@ -488,6 +497,8 @@ def build_distributions(lf: pl.LazyFrame, dis_cols: list[str], report: dict) -> 
         .filter(pl.any_horizontal(pl.col(dis_cols).is_not_null()))
         .unique()
         .collect()
+        # JKP practice: unique() does not keep the row order, so sort right after it.
+        .sort("PERMNO", "DisExDt", "DisSeqNbr")
     )
     check(dis["DisExDt"].null_count() == 0, "Distribution rows with no ex-date")
     n_events = dis.select("PERMNO", "DisExDt", "DisSeqNbr").unique().height
@@ -587,6 +598,7 @@ def final_checks(out: pl.DataFrame, report: dict) -> None:
 
 
 def main() -> None:
+    stamps = file_stamps([SRC, DAILY, DELIST, INDEX])
     report: dict = {
         "script": "scripts/data_cleaning/1_crsp_monthly.py",
         "inputs": {p.name: sha256(p) for p in [SRC, DAILY, DELIST, INDEX]},
@@ -605,6 +617,8 @@ def main() -> None:
     final_checks(out, report)
     dis = build_distributions(lf, dis_cols, report)
 
+    # The raw files were hashed first and read after: they must not have changed.
+    check_unchanged(stamps)
     publish(
         {
             PROCESSED / "crsp_monthly.parquet": out,
