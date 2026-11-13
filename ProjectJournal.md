@@ -1,6 +1,7 @@
 # Project journal: what was done, why, and how to defend it
 
-Written on 2026-11-12. Purpose: a single guide for **writing the report**, where
+Written on 2026-11-12, last updated on 2026-11-13 (results of the test of
+version A: sections 8.10 and 8.11). Purpose: a single guide for **writing the report**, where
 every step and every choice must be explained and justified. It consolidates the
 history that used to sit in the context brief (`../CLAUDE.md`), in
 `CleaningSpec.md` and in the audit packs.
@@ -20,7 +21,9 @@ How to read it:
 
 Contents: 1 Timeline · 2 Method and working rules · 3 Raw data · 4 Cleaning,
 step by step · 5 Data dictionary · 6 Audits across steps and reproducibility ·
-7 Decision register D1–D21 · 8 Backtest rules and their audit · 9 Limits to
+7 Decision register D1–D21 · 8 Backtest rules, signals, predictions, portfolio,
+freeze, **results of the test (8.10) and exploration after the test (8.11)** ·
+9 Limits to
 disclose · 10 Open items · 11 Incidents and lessons · 12 Sources to verify ·
 13 Map to the report sections
 
@@ -38,6 +41,9 @@ disclose · 10 Open items · 11 Incidents and lessons · 12 Sources to verify ·
 | 2026-11-12 | Step 9 audit handled. Whole chain rerun from raw files, reproducibility defect fixed. Final audit of the cleaning, alignment on the references, counter-audit. Backtest rules D12–D21 validated by Danny; `ret_d1` added. Astra's audit of the backtest rules (verdict "to review", no defect in the cleaned data) handled; final rules validated by Danny (section 8.4). **Cleaning closed.** |
 | 2026-11-13 | Signals: `3_signal_panel.py` written (join at the formation date, 23 market-scaled characteristics, ranks); data dictionary extended to the signal tables; audit by the separate agent (full recomputation, no difference), then lightened audit by Astra ("ready with reservations"); rule D26 and a dating test added. Ranks over the whole universe decided by Danny. **Signals closed** (section 8.6). |
 | 2026-11-13 | Predictions: aim of the project restated and models chosen by Danny (boosted trees as the main model, ridge for robustness, raw excess return as the target). `scripts/predictions/1_predictions.py` written and tested on random numbers only; audit by the separate agent, two audits by Astra, rule D27. First fit launched for version A (section 8.7). |
+| 2026-11-13 | Portfolio rules, backtest, order cap of 10 % and commission rule decided before any result; audits by the agent and by Astra; **strategy frozen** (`ee22d6708bdc`, sections 8.8 and 8.9). |
+| 2026-11-13 | **Single out-of-sample test of version A: no alpha** (main result −5.09 % a year against FF5 and momentum, t = −5.13; section 8.10). Sealed table opened afterwards. |
+| 2026-11-13 | Exploration after the test, decided by Danny: a patience rule brings the fund back to the market by making it passive; still no alpha (section 8.11, not out of sample). |
 | 2026-11-13 (evening) | Deadline of the project. |
 | 16 Nov, 23 Nov, 7 Dec 2026 | Project presentation sessions. |
 
@@ -1220,6 +1226,362 @@ betas is then misspecified (Ferson and Schadt 1996, to check). Postponed and
 declared: the factors rebuilt from our data (D20). Details: `SignalSpec.md`,
 section 6.
 
+### 8.10 Out-of-sample test of version A (2026-11-13): no alpha
+
+**The story in five sentences (for the report and the slides).**
+
+1. The machine-learning strategy (boosted trees) is slightly below its factor
+   benchmark before trading costs, not significantly, and clearly below it
+   after the simulated costs.
+2. The ridge regression is a little better: its alpha before costs is positive
+   but not always significant (it is not against FF5 and momentum on the
+   first-day execution), and it is negative after costs.
+3. The fund trades a great deal (110 % of its value a month), and this turnover
+   is what inflates the costs.
+4. We therefore tried, **after the test**, a patience rule that trades less, to
+   see whether another strategy would be worth trying (section 8.11).
+5. Even so, the gain in performance comes only from passivity: the portfolio
+   then follows the market more than it follows the forecasts. There is no
+   alpha in either case.
+
+**What was run.** The three frozen steps, once each, in order, under freeze
+`ee22d6708bdc`: candidates (run `f713bd2fcd67`), backtest (`8c89f31d11d4`),
+alphas (`83a28ed892ef`). No guard refused, no step was retried; the three
+openings are in `resources/test_openings.jsonl` and the attempts in
+`resources/test_steps/`. Results: `data/processed/alphas_A.csv` and
+`summary_A.csv`. Files for the team: `reports/results_version_A.md` (same
+content as here, with the reservations), `reports/tables_A.md` (every
+configuration, period and factor model), figures
+`reports/figures/A_cumulative_value.png`, `A_cash_share.png`, `A_costs.png`;
+all produced by `scripts/reports/1_results_tables.py`.
+
+Units in every table below: returns and alphas in % a year (monthly value
+× 12); t-statistics in parentheses (Newey-West, 6 lags); costs in basis points
+of the fund a month; turnover = purchases plus sales of a month in % of the
+fund. "Gross" is the net return plus the costs paid that month, on the path of
+the fund that paid them: it is not a strategy run without costs.
+
+**Main result, as defined before the test.** Version A (market
+characteristics), boosted trees, all sizes, first-day execution, order cap of
+10 % of the ADV, net of half spread and price impact, before commissions,
+1993–2025: **alpha against FF5 and momentum of −5.09 % a year (t = −5.13)**.
+
+Table 1. Main configuration.
+
+| | 1993–2025 | 1993–2008 | 2009–2025 |
+|---|---|---|---|
+| Excess return, gross | 9.00 | 5.74 | 12.07 |
+| Excess return, net (t) | 4.76 (1.70) | −2.01 (−0.47) | 11.14 (3.68) |
+| Volatility, net | 15.6 | 15.5 | 15.5 |
+| Sharpe ratio, net | 0.31 | −0.13 | 0.72 |
+| Market: excess return / Sharpe | 9.06 / 0.60 | 3.96 / 0.26 | 13.87 / 0.90 |
+| Net return minus market (t) | −4.30 (−4.47) | −5.97 (−3.76) | −2.73 (−2.61) |
+| Alpha net, CAPM | −3.81 (−3.74) | −5.64 (−3.50) | −2.24 (−1.91) |
+| Alpha net, FF3 | −4.03 (−3.88) | −5.88 (−3.46) | −2.49 (−2.09) |
+| Alpha net, FF5 | −4.37 (−4.12) | −6.44 (−3.48) | −2.54 (−2.26) |
+| **Alpha net, FF5 + momentum** | **−5.09 (−5.13)** | −7.28 (−4.07) | −2.78 (−3.04) |
+| Alpha gross, FF5 + momentum | −0.88 (−0.90) | 0.46 (0.26) | −1.85 (−2.05) |
+| Alpha net + commission stress, FF5 + momentum | −6.96 (−6.59) | −10.13 (−5.57) | −3.76 (−3.94) |
+| Half spread / price impact, bp a month | 21.4 / 13.8 | 42.0 / 22.6 | 2.1 / 5.6 |
+| Costs, % a year | 4.23 | 7.75 | 0.93 |
+| Turnover filled, % a month | 110 | 138 | 83 |
+| Cash after the trades, mean % | 0.7 | 1.4 | 0.03 |
+| Stocks held / effective stocks, median | 976 / 33 | 1,165 / 29 | 841 / 35 |
+| Largest weight, maximum % of the fund | 35.7 | 33.8 | 35.7 |
+
+Other numbers of the main configuration: conditional diagnostic (loadings
+moving with the share invested) −4.78 % (t = −4.90); loadings of the net return
+on FF5 and momentum: market 1.01, SMB −0.09, HML 0.07, RMW 0.04, CMA 0.01,
+momentum 0.10, R² 0.87; value of 1 invested at the end of 1992: market 29.7,
+fund after costs 7.1, and 28.6 for the gross index (the net return plus the
+costs paid, on the positions really held; not a fund run without costs).
+
+Table 2. Where the distance to the market comes from (main configuration,
+points a year).
+
+| | 1993–2025 | 1993–2008 | 2009–2025 |
+|---|---|---|---|
+| Fund before costs minus market | −0.07 | +1.78 | −1.80 |
+| Costs (half spread and impact) | −4.23 | −7.75 | −0.93 |
+| Fund after costs minus market | −4.30 | −5.97 | −2.73 |
+
+Over the whole period the costs are 98 % of the distance. After 2009 they are
+one third of it (34 %): the fund is already 1.8 point behind the market before
+paying them. These shares are about the mean return against the market, not
+about the factor-adjusted alpha. (−0.07 is computed on unrounded numbers;
+9.00 − 9.06 from table 1 gives −0.06.)
+
+Table 3. The ten configurations fixed at the freeze, alpha against FF5 and
+momentum.
+
+| Configuration | Gross, 1993–2025 | Net, 1993–2025 | Net + commissions | Net, 1993–2008 | Net, 2009–2025 | Costs bp | Turnover % | Net minus market |
+|---|---|---|---|---|---|---|---|---|
+| **Trees, all sizes, first day (main)** | −0.88 (−0.90) | **−5.09 (−5.13)** | −6.96 (−6.59) | −7.28 (−4.07) | −2.78 (−3.04) | 35.3 | 110 | −4.30 (−4.47) |
+| Trees, large universe, first day | −0.71 (−0.67) | −4.64 (−4.32) | −6.25 (−5.56) | −7.06 (−3.59) | −2.18 (−2.58) | 32.9 | 111 | −3.77 (−3.54) |
+| Ridge, all sizes, first day | 2.09 (1.22) | −4.01 (−2.28) | −7.04 (−3.92) | −7.39 (−3.08) | −0.32 (−0.15) | 51.5 | 130 | −2.78 (−1.53) |
+| Ridge, large universe, first day | 2.41 (1.54) | −2.96 (−1.85) | −5.32 (−3.28) | −5.89 (−2.46) | 0.29 (0.15) | 45.3 | 137 | −1.48 (−0.85) |
+| Trees, all sizes, close to close | −1.11 (−0.97) | −5.48 (−4.58) | −7.40 (−5.89) | −8.53 (−4.00) | −2.57 (−2.34) | 36.5 | 110 | −4.55 (−4.33) |
+| Trees, large universe, close to close | −1.05 (−0.83) | −5.07 (−3.91) | −6.71 (−4.99) | −8.21 (−3.47) | −2.05 (−2.09) | 33.7 | 111 | −4.05 (−3.50) |
+| Ridge, all sizes, close to close | 3.72 (1.82) | −2.50 (−1.24) | −5.57 (−2.74) | −4.39 (−1.49) | 0.23 (0.10) | 52.4 | 130 | −1.43 (−0.72) |
+| Ridge, large universe, close to close | 3.57 (2.06) | −1.88 (−1.11) | −4.26 (−2.50) | −3.46 (−1.43) | 0.34 (0.16) | 46.0 | 136 | −0.34 (−0.19) |
+| Trees, all sizes, first day, cap 1 % | −1.11 (−1.18) | −3.16 (−3.55) | −4.44 (−4.90) | −3.54 (−2.43) | −2.70 (−3.03) | 17.3 | 83 | −3.16 (−3.51) |
+| Trees, large universe, first day, cap 1 % | −0.57 (−0.59) | −2.56 (−2.83) | −3.70 (−4.02) | −3.08 (−1.93) | −2.08 (−2.57) | 16.8 | 85 | −2.46 (−2.54) |
+
+What the table says (measured):
+
+- No configuration has a positive net alpha over 1993–2025, and none beats the
+  market after costs.
+- The two universes give the same answer. Close-to-close execution changes
+  little for the trees.
+- The ridge has a positive gross alpha. Against FF5 and momentum it is not
+  significant on the first-day execution (t = 1.22 and 1.54) and reaches 2.06
+  only close to close in the large universe, an execution that a real order
+  cannot have. Against CAPM, FF3 and FF5 its t-statistic is above 2 in most
+  cells (11 of the 16 gross cells of 1993–2025 in `reports/tables_A.md`, for
+  example 2.08 and 2.51 against FF3 on the first day): the gross alpha
+  shrinks as factors are added (all sizes, first day: 4.09 % against CAPM,
+  3.49 % FF3, 2.55 % FF5, 2.09 % FF5 and momentum). Net, it is negative, significantly so in the
+  all-sizes universe (t = −2.28), and near zero after 2009.
+- The cap of 1 % is less negative only because the fund trades less and keeps
+  12.4 % of cash on average.
+- The commission stress removes a further 1.9 point a year from the main
+  configuration.
+
+**Mechanics measured** (main configuration). Costs through time, in bp a
+month: 95 in 1993–1996, 85 in 1997–2000, 52 in 2001–2004, 26 in 2005–2008, 16
+in 2009–2012, about 5 from 2013. Cash 8.9 % on average in 1993 (the fund starts
+in cash), almost zero from 1997. The largest position is above 10 % of the fund
+in 226 months of 396. 97.4 % of the amounts traded pay a quoted spread. The
+tree forecasts are coarse: up to 931 stocks tie with a breakpoint, and the top
+10 % equals the top 20 % in 34 months (43 in the large universe); the ridge
+has no ties.
+
+**Reading (interpretation, not measurement).** The answer to the question of
+the project is no: the strategy is not worthwhile for a manager.
+
+- Turnover destroys the result: about thirteen times the value of the fund is
+  traded each year, and the costs take what separates the gross alpha from the
+  net alpha.
+- There is no gross alpha to protect in the main model: the fund behaves like
+  the market (beta 1.01, R² 0.87).
+- Value weights concentrate the fund in a few very large stocks (33 effective
+  stocks), where a monthly forecast has least to say; this is probably why the
+  two universes agree.
+- Cash does not explain the result, and cheaper trading after 2009 does not
+  rescue it (the gross alpha of the trees is then negative).
+- The result agrees with the objection that machine-learning forecasts earn
+  their returns in stocks that are hard to trade, at a turnover that costs
+  erase (Avramov, Cheng and Metzker 2023; to check before citing).
+
+**Sealed table, opened after the results were written.** Trees: depth 3 (the
+deepest allowed) chosen in 19 years of 33, depth 2 in 12, depth 1 in 2; 50
+trees in 11 years, 100 in 15, 200 in 7; only 6 years strictly inside the grid;
+the worst setting of a year is on average 0.48 % above the best in validation
+loss (almost flat). Ridge: penalty 1 in 17 years, 0.1 in 14, 0.01 in 2; never
+at an edge. The grid is not extended. Reading: the tree model extracts little
+more than the mean, whatever its size.
+
+**Reservations to state with these results.** One main result named in
+advance and many secondary numbers (a t near 2 among them is not evidence);
+gross is not a costless strategy; the order cap of 10 % has no source; costs
+are a model (measured spread, impact formula, all trades in one day a month,
+no commission in the main number); value weights with no cap; coarse tree
+forecasts, squared error, a grid that binds on depth; the model of year Y is
+fitted on data up to Y − 13; Ken French factors only (D20 postponed, no
+q-factors).
+
+**Audit of the results by a separate agent (2026-11-13)** (blank context;
+report: `Workspace/output/2026-11-13_AUDIT_AGENT_resultats_test_A.md`).
+Verdict: ready with reservations, no blocking finding. Recomputed on its own:
+the 361 rows of `alphas_A.csv` and the 30 rows of `summary_A.csv` (own
+Newey-West, largest gap 1e-13); the ten configurations of the backtest with
+its own monthly step (1e-15); the candidate flags from the forecasts (no
+difference); the tables and figures (byte for byte); the 52 variants of
+section 8.11 (1e-15, no look-ahead). One opening and one attempt per step;
+every frozen file still has the hash of the freeze. Four findings in the text,
+all corrected: cash in 1993 is 8.9 %, not 11 % (a column misread); the note of
+results now refers to the exploration; the gross alpha of the ridge has a
+t-statistic above 2 against CAPM, FF3 and FF5, which the text denied; the
+side effect of trading every k months on cash is stated. Minor wording points
+were corrected where cheap. Not verified by the agent: the forecasts themselves and the
+citations.
+
+**Lightened audit by Astra (2026-11-13)** (report:
+`Workspace/output/2026-11-13_AUDIT_ALLEGE_resultats_test_A_pour_Claude.md`).
+Verdict: yes, the step can be closed; no blocking finding; no new run needed.
+The reading of the test candidates by the exploration script after the end of
+the test is compatible with the freeze and leaves version B its status. Done
+after it: table 2 computed on unrounded numbers (−0.07 instead of −0.06) with
+the share of the costs; a paired measure of the patience rule added to 8.11;
+the conclusion on the ridge limited to the patience rule; "gross" named a
+reconstructed index. To keep in the report and on the slides: the 52 variants
+were explored after the result of A was seen; a gross alpha of the trees that
+is not significant does not show that the forecasts hold no information, nor
+that predictability declined after 2009; an almost flat validation loss does
+not compare the model with a constant forecast; the multiples of wealth come
+from a fund of constant size. With one portfolio a GRS test is the test of
+its alpha: not done, and not needed.
+
+**Version B** (market and accounting characteristics) ran later the same day
+through the same frozen scripts: section 8.12.
+
+### 8.11 Exploration after the test: a patience rule (2026-11-13, not out of sample)
+
+**Status.** Decided by Danny after the result of version A was known, to see
+whether another strategy would be worth trying. Everything in this section was
+run on 1993–2025 with the result of 8.10 known: it is an in-sample diagnostic
+and must be presented as such, after the main result. It replaces nothing.
+
+**Why.** The test shows a turnover of 110 % a month and costs of 4.2 % a year.
+The question is whether the loss disappears when the fund trades less, and if
+so, whether what remains is skill.
+
+**What was varied** (`scripts/exploration/1_post_test_variants.py`; the frozen
+monthly step is imported unchanged, and with the frozen parameters the script
+reproduces the test month by month). Execution, order cap, costs and
+regressions are those of the frozen chain.
+
+- Patience p: a stock held is kept while it was in the top 20 % of the
+  forecasts in at least one of the last p months (frozen rule: p = 1).
+- Orders sent only every k months (frozen rule: k = 1). Side effect: an order
+  capped or not filled waits k months, so the fund holds more cash in the
+  1990s (ridge, k = 12: 80 %, 53 % and 46 % in 1993 to 1995). The patience
+  rule does not have this effect.
+- A cap of 5 % on target weights (frozen rule: none).
+
+Table 4. Trees, all sizes, 1993–2025 (market excess return: 9.06 %).
+
+| Rule | Net minus market | Alpha net, FF5 + mom. | Alpha gross, FF5 + mom. | Costs bp | Turnover % | Effective stocks |
+|---|---|---|---|---|---|---|
+| **Frozen rule (the test)** | −4.30 (−4.47) | −5.09 (−5.13) | −0.88 (−0.90) | 35.3 | 110 | 33 |
+| Patience 3 months | −0.88 (−1.35) | −1.36 (−2.39) | −0.35 (−0.61) | 8.5 | 33 | 63 |
+| Patience 6 months | −0.71 (−1.44) | −1.03 (−2.38) | −0.62 (−1.47) | 3.5 | 15 | 92 |
+| **Patience 12 months** | −0.33 (−0.82) | −0.47 (−1.49) | −0.28 (−0.97) | 1.6 | 6 | 128 |
+| Orders every 3 months | −1.06 (−1.26) | −1.96 (−2.43) | −0.61 (−0.75) | 11.1 | 37 | 32 |
+| Orders every 6 months | −0.75 (−0.79) | −1.44 (−1.79) | −0.71 (−0.87) | 5.7 | 20 | 32 |
+| Orders every 12 months | −0.98 (−1.19) | −1.53 (−1.93) | −1.13 (−1.44) | 2.9 | 11 | 28 |
+| Weight cap of 5 % alone | −3.69 (−3.83) | −4.52 (−4.52) | −0.19 (−0.20) | 36.4 | 109 | 50 |
+
+Table 5. Ridge, all sizes, 1993–2025.
+
+| Rule | Net minus market | Alpha net, FF5 + mom. | Alpha gross, FF5 + mom. | Costs bp | Turnover % | Effective stocks |
+|---|---|---|---|---|---|---|
+| **Frozen rule (the test)** | −2.78 (−1.53) | −4.01 (−2.28) | 2.09 (1.22) | 51.5 | 130 | 28 |
+| Patience 3 months | −1.03 (−0.78) | −2.01 (−1.65) | 0.05 (0.04) | 17.5 | 50 | 45 |
+| Patience 6 months | −0.59 (−0.57) | −1.18 (−1.34) | −0.31 (−0.36) | 7.4 | 24 | 67 |
+| Patience 12 months | −0.40 (−0.46) | −0.99 (−1.64) | −0.61 (−1.00) | 3.3 | 10 | 102 |
+| Orders every 6 months | −1.34 (−0.84) | −1.71 (−1.30) | −0.64 (−0.48) | 8.4 | 24 | 21 |
+| Orders every 12 months | 1.30 (0.89) | 1.75 (1.23) | 2.36 (1.60) | 4.2 | 11 | 20 |
+
+All 52 variants (two models, two universes, three periods):
+`reports/exploration/post_test_variants_A.csv`; note for the team:
+`reports/exploration_post_test_A.md`.
+
+**What it shows (measured).**
+
+- With a patience of 12 months the tree portfolio is 0.33 point a year behind
+  the market (t = −0.82) instead of 4.30; costs fall from 35 to 1.6 bp a month
+  and turnover from 110 % to 6 % a month. The improvement is regular in p.
+- No variant has a significant positive alpha. For the trees the net alpha
+  stays between −0.5 % and −2 % once trading is slowed.
+- The alpha before costs does not rise when trading slows; for the ridge
+  under the patience rule it falls from 2.09 % to about zero.
+- The weight cap alone changes little (net alpha of the trees −4.52 %).
+- The only positive net alphas (ridge, orders once a year: 4 cells of 52, the
+  largest 1.75 %, t = 1.23) are not significant, have a
+  neighbour of the opposite sign at six months, and depends on the month in
+  which the year starts.
+
+**Reading (interpretation).** The patience rule brings the fund back to the
+market by making it passive: it stops acting on most of the forecasts, holds
+four times as many effective stocks and earns the market return less small
+costs. Measured on the same 396 months (trees, patience of 12 months against
+the frozen rule): the net return gains 3.97 points a year, of which 4.04
+points are costs no longer paid and −0.07 point is gross return; the
+volatility of the gap to the market falls from 5.9 % to 2.0 % a year; the
+gross alpha differs by 0.60 point (t = 0.69). The gain is thus the costs no
+longer paid; better selection is not established. Under the patience rule the
+gross alpha of the ridge goes from 2.09 % to about zero (it stays at 2.36 %,
+t = 1.60, with orders once a year, so this holds for the patience rule only).
+A gap to the market that is not significant does not prove that the fund
+equals the market, and the t-statistics of this section are descriptive: the
+rules were chosen after the result was seen. Trying a further variant of this strategy is therefore not worthwhile;
+a different one would need forecasts that last longer or trades that cost
+less, and would need its own sample to be tested.
+
+### 8.12 Out-of-sample test of version B (2026-11-13): the complement confirms A
+
+Full note: `reports/results_version_B.md`; all numbers: `reports/tables_B.md`;
+figures: `reports/figures/B_*.png`.
+
+**What was run.** The forecasts of version B (194 characteristics: the 59
+market ones and 135 accounting ones) finished at 16:38 local time, after 141
+minutes of fitting (run `d78f1bbbbbef`). Their report shows the frozen
+prediction script and the inputs, settings and calendar recorded in the freeze.
+The three steps of the test were then run once each, with no retry (candidates
+`feb21459bbc2`, backtest `ca7630c772f5`, alphas `db7e90ae9d97`), under freeze
+`ee22d6708bdc` and after the three steps of A. No rule was changed between A
+and B. The forecast file of B did not exist at the freeze, so its hash is in
+the log of the openings of the test, not in the freeze record.
+
+**Result (1993–2025, % a year, Newey-West t-statistics with 6 lags).**
+
+| Main configuration (trees, all sizes, first day, cap 10 %) | Version A | Version B |
+|---|---|---|
+| Alpha against FF5 + momentum, net | −5.09 (−5.13) | −5.54 (−4.52) |
+| Alpha against FF5 + momentum, gross | −0.88 (−0.90) | −1.17 (−1.01) |
+| Alpha, net with the commission stress | −6.96 (−6.59) | −7.55 (−5.96) |
+| Conditional diagnostic | −4.78 (−4.90) | −5.03 (−4.47) |
+| Net excess return (market: 9.06) | 4.76 | 4.24 |
+| Sharpe ratio, net (market: 0.60) | 0.31 | 0.27 |
+| Half spread and impact, bp a month | 35.3 | 36.7 |
+| Turnover filled, % a month | 110 | 110 |
+| Effective number of stocks, median | 33 | 30 |
+| Largest weight, maximum % of the fund | 35.7 | 43.4 |
+| Value of 1 at the end of 2025, after costs (market: 29.7) | 7.1 | 6.0 |
+
+- **Adding the accounting characteristics does not change the answer.** Against
+  FF5 and momentum the net alpha of B is negative in all ten configurations
+  (|t| of 2.40 or more); before costs no alpha of the trees differs from zero.
+- **B is not better than A.** The monthly net return of B minus that of A is
+  −0.52 % a year (t = −0.67) for the main configuration, and no difference is
+  distinguishable from zero in any configuration (descriptive comparison, not
+  fixed at the freeze). The two funds are nearly the same: correlation of the
+  monthly net returns from 0.91 to 0.96.
+- Over all periods and factor models, 1 of the 120 net cells of B is positive
+  (ridge, large universe, close to close, CAPM, 1993–2008: 0.84 %, t = 0.32),
+  against 13 of 120 in A (all ridge, none significant); with the commission
+  stress all 240 are negative.
+- Same mechanism as in A: costs of about 37 bp a month (4.4 % a year) are
+  almost the whole distance between the gross and the net alpha; the return is
+  the market's (beta 0.99, R² 0.86).
+- In 36 formation months between December 2014 and November 2024, the
+  threshold and the number of stocks of the top 10 % of the trees are identical
+  in A and B, with the same settings chosen: in those months the trees of B
+  appear to make no use of the accounting characteristics (the forecasts
+  themselves were not compared).
+- Settings chosen by validation (sealed table opened after the results): depth
+  3, the deepest allowed, in 22 years of 33 (19 in A); the ridge chooses the
+  smallest penalty of its grid in one year. The grids are not extended.
+
+**Reading.** The reservation on restated Compustat accounts (D12) does not
+rescue B: under the usual presumption that restated data flatter a backtest, a
+point-in-time version B would be no better than what is shown; neither the
+sign nor the size of that effect is measured. What the test does not say: that
+accounting information is useless. It covers one use of it, a long-only,
+value-weighted, monthly fund of USD 100 million.
+
+**Audit.** A separate agent recomputed every alpha and t-statistic of both
+versions from the monthly records with its own code (largest gap 4e-16), the
+464 numbers of the tables of the note (two cells corrected: a double
+rounding) and the 1,250 numbers of `tables_B.md` (no gap), and checked the
+record of the test (one completed attempt per step, hashes equal to the files
+on disk, code and inputs of the freeze unchanged). It found seven sentences
+that were literally wrong or too strong (for example "negative in every cell
+of both versions", "coarser forecasts", "forecasts committed before the
+freeze"); all were rewritten before the note was sent. Astra did not audit the
+results of B.
+
 ## 9. Limits to disclose in the report
 
 1. Compustat accounts are in today's state; version B is exposed to
@@ -1239,8 +1601,24 @@ section 6.
     every quoted figure must be checked in the paper.
 12. Companies with tracking stocks have no market-scaled characteristic (D26);
     characteristics with low coverage get a neutral rank and a flag (D18).
+13. Results of the test (section 8.10; list in `reports/results_version_A.md`,
+    section 7): one main result named in advance and many secondary numbers;
+    the gross return is the net return plus the costs paid, not a costless
+    strategy; the order cap of 10 % has no source; value weights with no cap
+    (33 effective stocks); coarse tree forecasts and a grid that binds on
+    depth; Ken French factors only (D20 postponed, no q-factors).
+14. The patience rule and the other variants of section 8.11 were tried
+    after the test, on the same years: a diagnostic, not a result.
 
 ## 10. Open items (2026-11-12)
+
+Update of 2026-11-13: items 1, 3, 4 and most of 5 are done (signals,
+predictions, portfolio, backtest, freeze, test of version A). Still open:
+(the test of version B is done: section 8.12); the q-factors and the GRS
+test (not done); robustness; factors rebuilt from our data (D20); a second
+run of the predictions of A for reproducibility; the data dictionary for
+the new tables; an audit of the test results and of the report scripts;
+the report and the slides.
 
 1. Backtest rules: **done**, final rules in section 8.4 (validated by Danny on
    2026-11-12). Cleaning: **closed** (step 9 rerun `86a807cdfece`, output
@@ -1290,7 +1668,8 @@ Asparouhova, Bessembinder and Kalcheva (2013); Chen and Velikov (2023); Jones
 Hou, Xue and Zhang (2020); Avramov, Cheng and Metzker (2023); Gu, Kelly and Xiu
 (2020); Bryzgalova, Lerner, Lettau and Pelger (2024); Akey, Robertson and
 Simutin ("Noisy factors"); Asness and Frazzini (2013); Abdi and Ranaldo (2017);
-Gao and Ritter (NASDAQ volume). Used in full through their code: Jensen, Kelly
+Gao and Ritter (NASDAQ volume); Ferson and Schadt (1996); McLean and Pontiff
+(2016); Lewellen (2015); Kozak, Nagel and Santosh (2020). Used in full through their code: Jensen, Kelly
 and Pedersen (2023); Tidy Finance. Course example: Cooper, Gulen and Schill
 (2008).
 
@@ -1304,6 +1683,9 @@ and Pedersen (2023); Tidy Finance. Course example: Cooper, Gulen and Schill
 | Validation of the data | Market check 0.99999 (step 5); French breakpoints (step 4); HML 0.982 (6.1); reproducibility (6.4); audit trail (2.3) |
 | Portfolio construction and costs | Section 8.2; spreads of step 9; size groups of step 4 |
 | Factor models and alphas | Step 5 (factor table), D20 |
+| Method (signals, models, portfolio, costs, freeze) | Sections 8.5 to 8.9 |
+| **Results** | **Section 8.10 (tables 1 to 3); `reports/results_version_A.md`, `reports/tables_A.md`, `reports/figures/`** |
+| Why it fails; what a slower strategy gives | Section 8.11 (tables 4 and 5), to present as done after the test |
 | Robustness | D3 at −55 %, 12-month lag, French breakpoints, three universes, A against B, execution lag |
 | Limitations | Section 9 |
 | Appendix | Decision register (section 7); `CleaningSpec.md` |
