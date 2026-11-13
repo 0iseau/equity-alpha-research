@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "step": "candidates",
+  "version": "A",
+  "freeze_id": "ee22d6708bdc",
+  "freeze_sha256": "cd7e762e977db306d86c38f285c14157475eb971255a65db19a2da822d939956",
+  "predictions_test_sha256": "83662f116da0e2d53ff49be59ad72259b498b2f10a587bc098fbd2f14f569546",
+  "started_at_utc": "2026-11-13T14:18:50.892156+00:00",
+  "earlier_attempts": [],
+  "completed_at_utc": "2026-11-13T14:19:00.833652+00:00",
+  "run_id": "f713bd2fcd67",
+  "outputs_sha256": {
+    "portfolio_candidates_A_test.parquet": "32c99cfe211d5aa17a8263c501f365710c9f49d0968dba2b7e3ffba72ae9a7b8",
+    "portfolio_breakpoints_A_test.parquet": "f4ccd35a88760a38ea22a348f800c8e7e9b20477e947b1da9b554136aa2aea0a",
+    "portfolio_candidates_A_test_report.json": "364397f103b4097cc99d9b578fbf9f452135200183ea97774db75d727eef249b"
+  }
+}

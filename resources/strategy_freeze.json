@@ -1,0 +1,166 @@
+{
+  "freeze_id": "ee22d6708bdc",
+  "frozen_at": "2026-11-13T14:15:25.824608+00:00",
+  "declared_by": "Danny",
+  "statement": "The rules below are frozen. No statistic of the returns of the strategy has been computed or seen on 1993-2025, and the test and sealed files have not been opened. The test sample is opened once per version, by the code and on the inputs hashed here.",
+  "git_commit": "5dfb868e135785d1e16a4122948062cd1c39ce51",
+  "git_branch": "project/predictions",
+  "uncommitted_changes": "?? ProjectJournal_12.11_21.42_version_sent_to_team.md",
+  "code_sha256": {
+    "scripts/predictions/1_predictions.py": "1041b5b03876db6e92b7067fe45655661c856327690d7e58b752fba2d7bb7116",
+    "scripts/portfolio/1_candidates.py": "58c096ffb95d53deb72ff5da4ac5550f5db1abd72f68e2b1e0202b36d54b3f8e",
+    "scripts/backtest/1_first_day.py": "d9a744a7507b558d1663d28e4873a1f753738afe11edf03b4b6cfc825c249af7",
+    "scripts/backtest/2_backtest.py": "b020fb62387e60b7dd73d33a27d2ea5028a0e3b24274af73ea826274191297b8",
+    "scripts/backtest/3_alphas.py": "8107ab2df3ff027b3cd07be78bb6d140aeb955f3c2284a401c28bd2b3e2b47e8",
+    "scripts/backtest/freeze_guard.py": "6b1a53cb40b8ba9fbd61a51c7c568f5393b032dba0a3c7900f8916e652e6536c",
+    "scripts/data_cleaning/utils.py": "8bb95560ca202202167f11257618409f4cc54b104bcb4de56fe70f73d77f877c",
+    "resources/signal_list.csv": "2d1c5bc0bb652bf1970c45d28cdb79538f88882271514211b32167e7078e122a"
+  },
+  "inputs_sha256": {
+    "crsp_panel_acc.parquet": "f4cab2040a8873bd25aae5be4a6e3a2f92d34a33da5f892889491c65e6a931e1",
+    "crsp_daily_agg.parquet": "b0883f26f7ee9bc836b3f4c5bec803d1855952c406daed72c08905930a6e47eb",
+    "first_day_fills.parquet": "2179fe3502ef642f1febdc068aaed83b1b1369a761c910bf776714dc69f54a88",
+    "ff_factors_monthly.parquet": "004ba08386a91e99e242d57c77cef87ae5274ef33a3ff83cdf1b20c18afeb6d2",
+    "signal_ranks.parquet": "c49d9e1b1fc2cc3e50e859748609bdc7666de95e944308b9f5a3d2c84b2ca4be"
+  },
+  "predictions_test_sha256": {
+    "A": "83662f116da0e2d53ff49be59ad72259b498b2f10a587bc098fbd2f14f569546"
+  },
+  "prediction_commitments": {
+    "inputs": {
+      "crsp_panel_acc.parquet": {
+        "sha256": "f4cab2040a8873bd25aae5be4a6e3a2f92d34a33da5f892889491c65e6a931e1",
+        "from_run": "87be465f4640"
+      },
+      "signal_ranks.parquet": {
+        "sha256": "c49d9e1b1fc2cc3e50e859748609bdc7666de95e944308b9f5a3d2c84b2ca4be",
+        "from_run": "ff5eda29ad08"
+      },
+      "signal_list.csv": "2d1c5bc0bb652bf1970c45d28cdb79538f88882271514211b32167e7078e122a",
+      "data_dictionary.csv": "1c2624806f4c4b522ab9232d57662e19990921dac9be0df34f2d0905064afd16"
+    },
+    "settings": {
+      "lightgbm": "4.7.0",
+      "numpy": "2.3.5",
+      "polars": "2.1.0",
+      "lgb_params_depth1_example": {
+        "objective": "regression",
+        "boosting": "gbdt",
+        "tree_learner": "serial",
+        "learning_rate": 0.03,
+        "max_depth": 1,
+        "num_leaves": 2,
+        "min_data_in_leaf": 1,
+        "min_sum_hessian_in_leaf": 0.0,
+        "min_gain_to_split": 0.0,
+        "lambda_l1": 0.0,
+        "lambda_l2": 0.0,
+        "max_delta_step": 0.0,
+        "path_smooth": 0.0,
+        "feature_fraction": 1.0,
+        "feature_fraction_bynode": 1.0,
+        "bagging_fraction": 1.0,
+        "bagging_freq": 0,
+        "data_sample_strategy": "bagging",
+        "boost_from_average": true,
+        "linear_tree": false,
+        "extra_trees": false,
+        "use_quantized_grad": false,
+        "seed": 0,
+        "deterministic": true,
+        "force_col_wise": true,
+        "num_threads": 8,
+        "verbosity": -1
+      },
+      "lgb_data_params_example": {
+        "max_bin": 255,
+        "min_data_in_bin": 3,
+        "bin_construct_sample_cnt": 1000,
+        "enable_bundle": false,
+        "feature_pre_filter": false,
+        "use_missing": false,
+        "zero_as_missing": false,
+        "data_random_seed": 0,
+        "num_threads": 8,
+        "verbosity": -1
+      },
+      "depths": [
+        1,
+        2,
+        3
+      ],
+      "trees": [
+        50,
+        100,
+        200
+      ],
+      "lambdas": [
+        0.0001,
+        0.001,
+        0.01,
+        0.1,
+        1.0,
+        10.0,
+        100.0
+      ],
+      "min_leaf_share": 0.001,
+      "bin_sample": 500000
+    },
+    "calendar": {
+      "first_train_year": 1963,
+      "validation_years": 12,
+      "first_year": 1993,
+      "last_year": 2025
+    }
+  },
+  "documents_sha256": {
+    "SignalSpec.md": "ae3882ce29d4e7f7e7822ea169d4ef2b45c202496ee16bb0983f3dce2cb7bd77",
+    "ProjectJournal.md": "7ce8985f912a90094c990a036d337b5f2f1080d8de8b963a1f5ffe34578ba1dc"
+  },
+  "development_runs": {
+    "predictions_A_report.json": "51b66841a853",
+    "portfolio_candidates_A_development_report.json": "d5a5172ece0c",
+    "first_day_fills_report.json": "8de9c686b790",
+    "backtest_A_development_report.json": "96c5cc36a703"
+  },
+  "libraries": {
+    "python": "3.14.0",
+    "numpy": "2.3.5",
+    "polars": "2.1.0",
+    "statsmodels": "0.14.6",
+    "lightgbm": "4.7.0"
+  },
+  "rules": {
+    "samples": "test = return months 1993-01 to 2025-12; development = 1981-01 to 1992-12 (not out of sample, never a result). Each sample starts from a book that is all cash.",
+    "main_result": "version A, boosted trees, all sizes, first-day execution, order cap of 10 % of the ADV, net of half spread and price impact and before commissions, 1993-2025: alpha against the five Fama-French factors and momentum (Ken French files), Newey-West t-statistic with 6 lags",
+    "versions": "A (market characteristics) is the main conclusion; B (market and accounting characteristics) is a complement, run later through the same frozen scripts; its forecasts must come from the frozen prediction script. No rule is reopened after A is seen.",
+    "models": "gradient-boosted trees (main), ridge regression (robustness); both reported whatever they give",
+    "universes": "all eligible stocks (main); eligible stocks at or above the NYSE 20th percentile of market equity",
+    "selection": "bought if in the top 10 % of the forecasts (NYSE breakpoints, discrete quantile) and at least one characteristic observed; kept while in the top 20 %; stocks tied with a breakpoint are all in; a stock held with every characteristic missing can be reduced, not increased (D18); a stock held that leaves the universe or is no longer eligible has a target of zero",
+    "weights": "value weights (market equity of t) over the stocks to hold; no cap on a weight; concentration reported",
+    "execution": "orders frozen with the data of t; filled at the close of the first trading day of t+1 only if CRSP records a closing trade price (TR), a positive volume and no delisting (D13); sales before purchases; a sale cannot exceed what is held; purchases paid with the cash available and all reduced by one factor if it is short; unfilled purchase: cash; unfilled sale: position kept",
+    "capacity": "constant nominal capital of USD 100 million; order capped at 10 % of the ADV, the smaller of dolvol_21d and dolvol_126d at t, both required (without them the order is zero). The cap of 10 % is a capacity scenario: no source validates a fill of that size at the last trade of the day; the result with a cap of 1 % is shown next to it.",
+    "costs": "half spread on each amount filled (D14: quoted; else high-low if ranges were observed; else the mean of the eligible stocks of the same size group and month; the highest group mean of the month if the stock has no size group or its group has no donor) and price impact lambda x sqrt(amount filled / ADV) per dollar, on the amount really filled after any reduction of the purchases, lambda 0.025 nano and micro, 0.015 small, 0.010 large and mega, 0.025 without a size group (D22). No commission in the main result (D15).",
+    "returns": "the book held earns the first-day return; a position earns (1 + ret) / (1 + ret_d1) - 1 for the rest of the month; unknown return of a stock held: full write-off (D16); a stock with no row the following month leaves the panel and its value goes to cash (D17); cash after the trades earns the risk-free rate of the month; gross return = net return + costs of the month",
+    "configurations": [
+      "gbrt_all_d1 (main)",
+      "gbrt_large_d1",
+      "ridge_all_d1",
+      "ridge_large_d1",
+      "gbrt_all_close",
+      "gbrt_large_close",
+      "ridge_all_close",
+      "ridge_large_close",
+      "gbrt_all_d1_cap01",
+      "gbrt_large_d1_cap01"
+    ],
+    "comparisons": "secondary and fixed here: the ten configurations (two models, two universes, close-to-close execution, order cap of 1 %); commission stress of USD 0.06 a share until December 2004 and 0.04 from January 2005 on the same fills; gross against net; sub-periods 1993-2008 and 2009-2025; version A against version B",
+    "evaluation": "regression of the excess return (over the risk-free rate) on CAPM, FF3, FF5 and FF5 + momentum, Ken French factors, Newey-West with 6 lags and no small-sample correction; mean of the return minus the market (FF3 market factor) with the same t-statistic; one conditional diagnostic for the main configuration on 1993-2025: the six factors and their products with the share of the fund invested at the previous month end, centred on its mean (computed the same way for version B when it is run)",
+    "factors_rebuilt_from_our_data": "rule D20 is postponed: not part of this test; if done later it is secondary",
+    "sealed": "predictions_<version>_choices_sealed.parquet is opened after the test results are written, to report the values chosen at the edge of their grid"
+  },
+  "trials_on_the_development_years": [
+    "2026-11-13: with the order cap of 1 % of the ADV (rule of 2026-11-12) the fund stayed 72 to 85 % in cash on 1981-1992. Caps of 0.5, 1, 5, 10, 25 and 100 % were compared on the cash share, the turnover and the costs. The simulator produced monthly returns for these runs, as it always does; no statistic of performance was computed, printed or looked at to choose the cap. The project owner chose 10 %, with 1 % as the stress test.",
+    "2026-11-13: the alpha script was run on the development backtest to check that it runs; it computes its regressions and writes and prints none of them."
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "status": "done",
+  "step": "backtest",
+  "version": "B",
+  "freeze_id": "ee22d6708bdc",
+  "freeze_sha256": "cd7e762e977db306d86c38f285c14157475eb971255a65db19a2da822d939956",
+  "predictions_test_sha256": "5d1275dd7912c4c15e7bad2b3a59654b8a6ec98570b7bfd908e55e1cd2a0ab5f",
+  "started_at_utc": "2026-11-13T15:44:59.679637+00:00",
+  "earlier_attempts": [],
+  "completed_at_utc": "2026-11-13T15:45:35.665841+00:00",
+  "run_id": "ca7630c772f5",
+  "outputs_sha256": {
+    "backtest_B_test.parquet": "1b0a8c3bde128dff9da64b8a22b1fa71af5ac887efdd026ad1b6b840695b0b3e",
+    "backtest_B_test_report.json": "1d6bc512d862ca30b4fc57d6bf60f9f3b5f64a9aaa45774057ec9d805ddff240"
+  }
+}

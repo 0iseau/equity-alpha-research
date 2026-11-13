@@ -1,0 +1,17 @@
+{
+  "status": "done",
+  "step": "alphas",
+  "version": "A",
+  "freeze_id": "ee22d6708bdc",
+  "freeze_sha256": "cd7e762e977db306d86c38f285c14157475eb971255a65db19a2da822d939956",
+  "predictions_test_sha256": "83662f116da0e2d53ff49be59ad72259b498b2f10a587bc098fbd2f14f569546",
+  "started_at_utc": "2026-11-13T14:20:37.195083+00:00",
+  "earlier_attempts": [],
+  "completed_at_utc": "2026-11-13T14:20:38.414248+00:00",
+  "run_id": "83a28ed892ef",
+  "outputs_sha256": {
+    "alphas_A.csv": "87da1eb23e5550b5e92c540a95e26372b0f0df47226e18ad7194ca14a3641253",
+    "summary_A.csv": "4881b72e1ed09a9219352bde957370d1d54002afbf2c593fbc3897ddddf1c6db",
+    "alphas_A_report.json": "26e25d8b08a1f4db678bbac522f607acafd0c382a73d9b5d5e5ac56b1ddc3515"
+  }
+}

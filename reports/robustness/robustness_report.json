@@ -1,0 +1,22 @@
+{
+  "script": "scripts/robustness/1_robustness_tests.py",
+  "script_sha256": "b748f31cce79557fff41aa77f08815036d181d2e4bdab92d3b9181c78f71697b",
+  "status": "run after the out-of-sample test of version A; not out of sample",
+  "tests_run": [
+    "1",
+    "23"
+  ],
+  "inputs_sha256": {
+    "ff_factors_monthly.parquet": "004ba08386a91e99e242d57c77cef87ae5274ef33a3ff83cdf1b20c18afeb6d2",
+    "crsp_panel_acc.parquet": "f4cab2040a8873bd25aae5be4a6e3a2f92d34a33da5f892889491c65e6a931e1"
+  },
+  "outputs_sha256": {
+    "capital_A.csv": "832035929253da5153b198b7403dd35b60ad31361e57b421d3bf8f60ed4e447f",
+    "cost_break_even_A.csv": "8fcb437a310f07617083c831c207fbe046109f538c2ed07ae4c9f1d00ef77a22",
+    "cost_multiplier_A.csv": "0bce728343ced542bac15e565f76823029abfe207493b90835cb866507c052a0",
+    "decile_sorts_A.csv": "78d788ac2c98c9f6e8b84ab79da0819c699719138f123447beda6c961f0ae22d",
+    "decile_sorts_A_monthly.csv": "156aa475f485ee1cee464f964a9b6216ab882746da49200f3171580a1f8e5afc",
+    "decile_spreads_A.csv": "c9bf1968c77392b806bcf02546046bb55acaa344f136624dddd436ade0ac2ef3",
+    "rank_ic_A.csv": "0626b5354e67f424e5e9df233feb240cd84314d0dac80f43828a58ba1172b43a"
+  }
+}

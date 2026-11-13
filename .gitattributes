@@ -1,0 +1,10 @@
+# The files hashed by the freeze of the strategy keep the bytes they have in the
+# working tree: Git must not rewrite their line endings on a checkout.
+scripts/predictions/*.py text eol=lf
+scripts/portfolio/*.py text eol=lf
+scripts/backtest/*.py text eol=lf
+resources/signal_list.csv text eol=lf
+# The records of the freeze and of the test runs are kept byte for byte.
+resources/strategy_freeze.json -text
+resources/test_openings.jsonl -text
+resources/test_steps/*.json -text
