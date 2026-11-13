@@ -280,6 +280,19 @@ JKP `add_me_data_and_compute_me_mev_mat_eqdur_vars`; GKX for the ranks.
   formations with an incomplete company value, 3 with accounts). Our links (D5)
   are stricter than JKP's. Secondary share classes keep their version A signals;
   their accounting signals stay missing and are never copied through `permco`.
+  Two more differences in the denominator: JKP sums the classes by `permco` and
+  CRSP date, we sum by `permco` and month; JKP then keeps, by `gvkey` and month,
+  the largest company value among the main common stocks
+  (`load_mkt_equity_data`), we take the company value of the linked stock.
+- **Rule D26: one CRSP company, several Compustat companies.** When the
+  `permco` of the month has stocks linked to more than one `gvkey` (tracking
+  stocks: the Liberty groups, for instance), `me_company` is the value of the
+  whole and the accounts are those of one part. The 23 characteristics are then
+  missing; the other accounting characteristics are kept. 2,231 eligible
+  formations with accounts, 26 CRSP companies. JKP has no such rule. Reference
+  case: PERMNO 15997 (Braves Group), April 2023: `debt_mev` would be 697 of
+  debt of the Braves Group over the 27,709 of market value of all Liberty
+  groups; it is missing, `debt_at` is kept.
 - **Ranks (D18, fixed after the audit).** At t, over the eligible stocks only,
   rank the finite observed values with the average rank for ties. For n ≥ 2
   observed: `s = 2(r − 1)/(n − 1) − 1`. A missing or non-finite value gets 0
@@ -349,9 +362,9 @@ Notes on the build:
   `beta_60m` 74.8 %, share changes over 12 months 91.7 %. The long windows
   have low coverage by construction; rule D18 gives them a neutral rank and a
   flag.
-- Still to do: script 3 (join at the formation date, the 23 market-scaled
-  characteristics, ranks), the extension of the data dictionary to the three
-  signal tables, and the audit of the built signals.
+- Script 3 and the extension of the data dictionary were done on 2026-11-13
+  (section 8e), the lightened audit by Astra was handled (section 8f), and the
+  step was closed the same day.
 
 ## 5. Acceptance cases (recomputed by the auditor from the tables)
 
@@ -427,8 +440,14 @@ Following GKX, as the adviser describes.
    regression; the signed equal-weight score is shown on 1963–2025 and
    labelled **retrospective benchmark**, never as a strategy available at the
    time.
-3. **Sector neutrality.** Ranks inside industries do not guarantee neutral
-   portfolio weights. Recommendation: a constraint on portfolio weights against
+3. **Sector neutrality: ranks decided on 2026-11-13.** The ranks are taken
+   over all eligible stocks of the month, not inside industries. Reasons, given
+   before any return was looked at: it is the GKX rule that the method follows;
+   a rank inside an industry would remove the part of a characteristic that
+   differs between industries, which is information the model may use, and
+   would make ranks noisy in small industries (few stocks per month before the
+   1970s); and it would not make the portfolio neutral anyway. Still open, with
+   the portfolio rules: a constraint on portfolio weights against
    the value-weighted universe, on the 12 Fama-French industries built from the
    historical CRSP SIC code, with an "unknown" industry; tolerance to fix with
    the portfolio rules. Factor neutrality is measured ex post by the alphas.
@@ -555,6 +574,73 @@ the few changes of the CRSP factor that have no dated event, a later vintage in
 which the level is no longer precise would lose the change. `CleaningSpec.md`,
 step 9, gives the measured effect. Removing this limit would need a historical
 source of share events that we do not have.
+
+## 8e. Script 3, and its audit by a separate agent (2026-11-13)
+
+`3_signal_panel.py`, run `13160ba101a8`. Still open: the lightened audit by
+Astra, which closes the step.
+
+| | |
+|---|---|
+| `signal_panel.parquet` | 5,210,894 stock-months, 194 characteristics (59 A, 135 B of which 23 market-scaled); SHA-256 `0eb99366…a6e858` |
+| `signal_ranks.parquet` | 3,805,426 eligible stock-months, 194 ranks (Float32) and 194 flags `<name>_miss` (Int8); SHA-256 `75c36f1f…a4b86a` |
+| Three runs in a row | same SHA-256 for both files |
+| Acceptance cases of section 5 | 11 of 11 within 1e-8 at 2000-12; the accounts of fiscal year 1999 are attached from 2000-06 to 2001-05 and not in 2000-05 or 2001-06; PERMNO 10028 at 2013-09 missing; GVKEY 008644 missing on its 12 stock-months |
+| Tests at 1975-06, 1999-12, 2015-03 (twelve months each) | identical when the accounts closed less than 6 months before are hidden (and different when one more month is hidden); version A identical without accounts and links; ranks identical when the stocks that are not eligible change (and different when eligible ones change); ranks recomputed with scipy, largest gap 3e-8 |
+| Company market value | 60 eligible formations incomplete, 3 with accounts: their 23 characteristics are missing |
+| Lowest coverage (eligible, from 1963) | `pstk_gr3` 11.8 %, `pstk_gr1` 13.6 %, `seas_16_20na` 22.3 % |
+
+Choices of the script with no effect on the values: work by blocks of five
+years (the full table does not fit in memory), both outputs sorted by
+(`yyyymm`, `permno`); `signal_ranks` holds the eligible rows only. The data
+dictionary is extended to the four signal tables by `signal_dictionary.py`
+(937 columns in 11 tables).
+
+**Audit by the separate agent** (blank context, read only; report:
+`Workspace/output/2026-11-13_AUDIT_AGENT_signaux_script_3.md`). It recomputed
+both files in full with its own code, all months from 1930 to 2025: no
+difference in values, missing values, ranks or flags. No blocking finding.
+
+| # | Finding | What was done |
+|---|---|---|
+| 1 | Important: the published report did not come from the script on disk (the script was edited while a run was going), and the agent could not verify reproducibility. | Run again: same SHA-256 (third identical run). The report now records the SHA-256 of the script. |
+| 2 | The "truncation" test cannot fail on the market side (a block reads its own months by key); on the accounting side the bound is exact for month T only. | The test is renamed for what it tests. That no later month is read holds by construction for this script; checks 3 and 5 of section 4.4 are met that way here, and by real truncation tests in scripts 1 and 2. |
+| 3 | The two renames at publication are not one atomic step; a killed process leaves temporary files. | Same limit as `utils.publish`; a mixed state is detected downstream by the hash. Documented, not changed. |
+| 4 | No hash for `signals_acc.parquet` and for the dictionary among the inputs. | Added. |
+| 5 | Dictionary: `predictor` role in `signals_acc`, which has no availability date; market-scaled descriptions silent on `me_company`; `me_company_complete` used but labelled `audit`. | Every column of `signals_acc` is a `transform_input`; the 23 descriptions name `me_company` of month t; `me_company_complete` is `transform_input;audit`. |
+| 6 | Two checks would raise a type error instead of a check error; `mev` is computed after the non-positive company value is removed (JKP: before). | Checks guarded. No row has a non-positive company value: no effect, left as is. |
+
+Not verified by the agent: that `acc_datadate` is the latest usable fiscal year
+(step 8) and the construction of `me_company` (cleaning), both audited with
+their own steps. To know for the models: `chcsho_1m` has only 12 distinct
+values in its worst month; GVKEY 179077 carries accounts on two stocks in
+2017-10 (one of them not eligible).
+
+## 8f. Lightened audit by Astra, rule D26 and the dating test (2026-11-13)
+
+Report: `Workspace/output/2026-11-13_AUDIT_ALLEGE_signaux_script_3_pour_Claude.md`.
+Verdict: "ready with reservations", no blocking finding. Two stock-months that
+nobody had used (PERMNO 31318 in 1998-11, 15997 in 2023-04) give the published
+`be_me`, `debt_mev` and ranks exactly. The figures of section 8e describe the
+run before this audit; the current run is the one below.
+
+| # | Finding | What was done |
+|---|---|---|
+| 1 | Important: for a CRSP company with several Compustat companies, the accounts of one part are divided by the market value of the whole (PERMNO 15997, Braves Group, 2023-04). | Checked: 2,031 eligible formations with accounts by Astra's count (several `gvkey` with accounts), 2,231 by ours (several `gvkey` linked). **Rule D26** (section 4.3): the 23 market-scaled characteristics are missing there. |
+| 2 | Important: "by construction" does not meet checks 3 and 5 of section 4.4 to the letter. | Test added at the three dates: the production path runs on the block that holds T with sources that end at T (panel, a reader of `signals_price` for which later months do not exist, accounts closed at T − 6 months at the latest) and must give the file; the reader must refuse month T + 1; market characteristics moved by one month must be detected. The test covers the block that holds T (1975-01 to 1975-06, 1995-01 to 1999-12, 2015-01 to 2015-03), not all the months before it. |
+| 3 | Minor: two differences from JKP in the denominator were not written. | Written in section 4.3. |
+| 4 | Minor: keep D18. A rare characteristic gives a rank of 0 with a flag of 1 almost everywhere; a model can then learn from the flag (availability, age of the listing). `chcsho_1m` has 12 distinct values in its worst month. | Kept. For the models (section 6): a minimum leaf size is already in the budget; a comparison with and without flags on the validation sample is a possible check, to decide with the method. |
+| 5 | Minor: the ranks over the whole universe can be defended; a measure is missing (by decade, stocks per industry and the share of the variance of the ranks explained by industry means), and the tolerance of the industry constraint is to fix before the test. | Not done: descriptive, for the report. The tolerance belongs to the portfolio rules (section 7, decision 3). |
+
+Run after these corrections: `ff5eda29ad08` (two runs in a row with the same
+SHA-256); `signal_panel.parquet` SHA-256 `0f078361…e3b462`,
+`signal_ranks.parquet` `c49d9e1b…2ca4be`. Compared column by column with the
+run before: of the 588 columns of the two files, 69 changed, which are the 23
+market-scaled characteristics, their 23 ranks and their 23 flags (about 2,300
+more missing values in each raw column, all rows counted); the 171 other
+characteristics, their ranks and their flags are identical. Rule D26 is a
+project rule added after an audit and before any return was looked at;
+**confirmed by the project owner on 2026-11-13. The signal step is closed.**
 
 ## 9. Sources
 
