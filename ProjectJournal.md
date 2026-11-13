@@ -37,6 +37,7 @@ disclose · 10 Open items · 11 Incidents and lessons · 12 Sources to verify ·
 | 2026-11-11 | Old scripts `data_cleaning.py` and `monthly_repetitions.py` and their outputs deleted; cleaning restarts from zero under `CleaningSpec.md` (JKP and Tidy Finance as references). Steps 1 to 10 implemented and audited one by one in the day. Scripts moved to `scripts/data_download/` and `scripts/data_cleaning/`. Repository switched to English. Git incident (section 11). |
 | 2026-11-12 | Step 9 audit handled. Whole chain rerun from raw files, reproducibility defect fixed. Final audit of the cleaning, alignment on the references, counter-audit. Backtest rules D12–D21 validated by Danny; `ret_d1` added. Astra's audit of the backtest rules (verdict "to review", no defect in the cleaned data) handled; final rules validated by Danny (section 8.4). **Cleaning closed.** |
 | 2026-11-13 | Signals: `3_signal_panel.py` written (join at the formation date, 23 market-scaled characteristics, ranks); data dictionary extended to the signal tables; audit by the separate agent (full recomputation, no difference), then lightened audit by Astra ("ready with reservations"); rule D26 and a dating test added. Ranks over the whole universe decided by Danny. **Signals closed** (section 8.6). |
+| 2026-11-13 | Predictions: aim of the project restated and models chosen by Danny (boosted trees as the main model, ridge for robustness, raw excess return as the target). `scripts/predictions/1_predictions.py` written and tested on random numbers only; audit by the separate agent, two audits by Astra, rule D27. First fit launched for version A (section 8.7). |
 | 2026-11-13 (evening) | Deadline of the project. |
 | 16 Nov, 23 Nov, 7 Dec 2026 | Project presentation sessions. |
 
@@ -648,6 +649,8 @@ one at a time, for example `python scripts/data_cleaning/4_crsp_size.py`.
 | D13–D21 | Backtest rules | Section 8.2 | Astra's proposals, section 8.1 |
 | D24 | A window with a missing month gives no value | "Missing stays missing"; both audits | Index carried over the gap (JKP) |
 | D25 | The flow items of a transition fiscal year are missing | A flow over less than 12 months is not an annual flow | Use it as it is (JKP) |
+| D27 | A target is used in a fit only once it is known: end of the latest of its return month, the month of `delamtdt`, the month of `delnextdt` | A delisting return can rest on an amount paid later; found by Astra before any fit (3,952 targets, 895 known in a later calendar year) | Date every target at its return month |
+| D15 (2026-11-13) | No commission in the main result on 1993–2025; one stress test at 6 then 4 cents per share | No series covers the period (Jones ends in 2000); the main number rests on measured costs only | A schedule of our own inside the main result |
 | D26 | The 23 market-scaled characteristics are missing when the CRSP company of the month is linked to several Compustat companies | The accounts of one part would be divided by the market value of the whole (tracking stocks); 2,231 eligible formations | Largest company value by `gvkey` (JKP) |
 
 **Rule D12 in full.** The restatement bias cannot be measured with our data, so
@@ -1040,6 +1043,182 @@ method can be justified by theory and by the literature; a benchmark model
 whose only purpose is to show what machine learning adds is not required. The
 choice of the models is therefore still open, and section 6 of `SignalSpec.md`
 is to be reread with this in mind before the first estimation.
+
+### 8.7 Predictions: models, rules and the script (2026-11-13)
+
+**Decisions of Danny, before any fit** (`SignalSpec.md`, section 7, decision 2).
+
+- The committee does not ask for a comparison of machine learning with
+  econometric models. The aim is alpha, looked for as realistically as
+  possible; not finding any is a result.
+- **Main model: gradient-boosted trees** (LightGBM). **Robustness model: ridge
+  regression**, reported whatever it gives. Two models of different natures: if
+  they agree, the conclusion does not rest on the model.
+- **Target: the excess return of the next month, as it is.** A direction target
+  (up or down) was rejected: it drops the size of the return, mostly follows
+  the market, and the forecast only orders the stocks of a month.
+- Left out: neural networks (first in the literature, but not auditable in the
+  time available), a random forest on top of boosting (close forecasts for one
+  more trial), the retrospective signed score.
+- Why these two models: a very weak signal, 388 strongly correlated inputs and
+  missing values that carry information. A ridge penalty shares the weight
+  between correlated inputs and has a unique solution; shallow boosted trees
+  are invariant to monotone transformations, hence consistent with ranks, and
+  use interactions of low order. References to check before citing: Gu, Kelly
+  and Xiu (2020), Lewellen (2015), Kozak, Nagel and Santosh (2020), Avramov,
+  Cheng and Metzker (2023) for the objection on small stocks and costs.
+
+**Rules** (`SignalSpec.md`, section 6, rules 1 to 9). One fit per return year
+from 1993 to 2025; training on the return years 1963 to Y − 13, validation on
+Y − 12 to Y − 1; the model that predicts is the one fitted on the training
+sample with the values chosen on validation. Trees: squared error, learning
+rate 0.03, depth 1 to 3, 50 to 200 trees, leaves of at least 0.1 % of the rows.
+Ridge: seven values of the penalty from 1e-4 to 100. Choice on the mean of the
+monthly squared errors of the validation months. Versions A (118 inputs) and B
+(388 inputs).
+
+**Why LightGBM.** The boosting engine of scikit-learn converts its inputs to
+64-bit numbers: about 9 GB for version B, more than the machine can give.
+LightGBM is the same family of algorithm in another implementation; every
+setting is written in the script.
+
+**What the audits changed, all before any fit.**
+
+- **Separate agent**: no look-ahead found, own reimplementation identical on
+  seven synthetic scenarios, all LightGBM settings checked. Three findings
+  corrected: memory of version B (no copy of the matrix, inputs in a temporary
+  file, bins from at most 500,000 training rows); a leak to the readers (from
+  1994 on, the validation losses are out-of-sample errors inside the test
+  period: they and the values chosen now go to a sealed table, and only the
+  record of 1993 is shown); a self-test that let 9 of 20 mutations of the code
+  pass (a second, plain writing of the rules was added to it).
+- **Astra, first audit**: one blocking finding, real. A delisting return can
+  rest on an amount paid later, and the script could use it before it was
+  known. Measured on dates only: 3,952 such targets, 895 known in a later
+  calendar year, 11 known twelve years or more after their month. **Rule D27**:
+  a fit uses only the targets known at the end of December before its year.
+  Also: the development years (1981–1992) and the test years are now in two
+  files, so that the portfolio code cannot read the test by mistake.
+- **Astra, counter-audit**: version A can be run, no finding left.
+
+**Guard rails of this step.** The script shows no statistic that relates a
+forecast to a return of 1993–2025. The sealed table is not to be opened before
+the strategy is frozen. The portfolio and cost code is developed on the
+forecasts of 1981–1992 only, which are not out of sample and never a result.
+The settings can be reviewed on the record of 1993 and on these years only:
+a change made after seeing the test period would be a new trial.
+
+**To state in the report.** The model of year Y does not learn from the twelve
+years before Y (they choose its values). Squared error with equal weights lets
+small stocks weigh on the fit; GKX use a Huber loss for their trees. The
+capacity is small (200 trees at 0.03): choices at the edge of the grid are
+reported after the freeze, and the grid is not extended. Four sets of forecasts
+(two versions, two models): the main one is version A with the trees, named
+before any fit, and all four are reported.
+
+### 8.8 Portfolio construction and commissions (2026-11-13, before any result)
+
+**A rule of work changed.** Danny, 2026-11-13: the course does not prevail. Its
+conventions are a simplified example; a choice is justified by theory (the
+properties of the data and of the method) and by the literature. Decisions
+already validated are not reopened.
+
+**The candidates of each month** (`scripts/portfolio/1_candidates.py`;
+`SignalSpec.md`, section 6, "Portfolio construction"). This step uses the
+information of month t only and reads no return; the weights really held come
+from the backtest, because they depend on the orders filled.
+
+- **Top decile of the forecasts.** A decile is the usual sort of the literature
+  (GKX form decile portfolios of their forecasts), and the buffer validated on
+  2026-11-12 (bought in the top 10 %, kept in the top 20 %) already assumes it.
+  The threshold was fixed before any result and no other threshold is tried.
+- **NYSE breakpoints**: the 90th and 80th percentiles of the forecasts are
+  taken over the eligible NYSE stocks of the universe. Theory: the smallest
+  stocks are most of the names for a few per cent of the market value, and the
+  extreme forecasts sit among them; with breakpoints over all stocks the top
+  decile would be made of stocks that a fund of USD 100 million cannot hold.
+  Literature (to check before citing): Fama and French (2008), Hou, Xue and
+  Zhang (2020), and Avramov, Cheng and Metzker (2023) for the same criticism of
+  machine-learning forecasts. GKX sort on all stocks: a declared difference,
+  which answers in advance the most likely objection of the committee.
+- Same quantile convention as the size groups of the cleaning (discrete
+  quantile; a stock at or above the breakpoint is in). The "decile" therefore
+  holds a little more than 10 % of the NYSE stocks. Stocks tied with a
+  breakpoint are all in; shallow trees give many equal forecasts.
+- Two universes (all sizes; at or above the NYSE 20th percentile), two models,
+  flags for each. A stock with no observed characteristic cannot start a
+  purchase.
+- The script refuses the forecasts of 1993–2025 until the freeze is recorded in
+  `resources/strategy_freeze.json`.
+
+**Commissions (D15 amended).** The series of Jones (2002) is not a data file
+and ends in 2000; no clean series exists for 1993–2025. Decision: **no
+commission in the main result**, which keeps to the costs that are measured
+(half spread) or taken from a stated formula (price impact), as the studies of
+the trading costs of anomalies do (Novy-Marx and Velikov 2016, to check); and
+**one stress test shown next to it**, with a commission of 6 cents per share
+until 2004 and 4 cents from 2005, converted with the price of each trade. The
+schedule comes from scattered figures for institutional investors (Greenwich
+Associates and others, about 6 cents in the 1990s, 5 to 6 around 2004, 1 to 4
+in the mid-2010s; to check before citing) and is cautious for a fund that
+trades by algorithm. Sources read on 2026-11-13: the paper of Jones on the
+Columbia and NBER sites; Markets Media ("Flashback Friday: commission rates",
+"Cost to trade equities and ETFs"); Greenwich Associates, commission rate
+study.
+
+### 8.9 Backtest, order cap and freeze (2026-11-13)
+
+**What exists.** `scripts/backtest/1_first_day.py` (could an order be filled on
+the first trading day), `2_backtest.py` (the portfolio month by month with
+execution and costs), `3_alphas.py` (alphas against CAPM, FF3, FF5 and FF5 with
+momentum, Newey-West with 6 lags), `4_freeze.py` (the freeze record). Each has
+a self-test on hand-written cases; the backtest's holds eight months computed
+by hand and a check that no month depends on a later one. Description:
+`SignalSpec.md`, section 6, "Backtest".
+
+**Order rules validated by Danny** (after the audits of the agent and of Astra
+on the portfolio): every stock tied with a breakpoint is in, and the mention
+"ties by PERMNO" of D21 is withdrawn; a stock not held is bought in the top
+10 % if it has at least one observed characteristic; a stock held is kept in
+the top 20 %, and cannot be increased while every characteristic is missing; a
+stock held that leaves the large universe or is no longer eligible gets a sale
+order; a sale that cannot be filled leaves the position in the book.
+
+**D22 amended: order cap at 10 % of the ADV, 1 % as the stress test.** With the
+cap of 1 % written on 2026-11-12, the fund stayed 72 to 85 % in cash on
+1981–1992: the simulation trades one day a month, and USD 100 million is very
+large against the volumes of the 1980s. The main result would have been the
+return of cash. Danny raised the cap to 10 % before the freeze, on the
+mechanics of the development years only (cash, turnover, costs); **no return
+of the strategy was computed or looked at**. With 10 % the fund is 67 to 82 %
+invested and pays about 46 basis points a month of spread and impact. To
+remember for the report: a reference for the 10 % limit is still to be found;
+the all-sizes universe is mostly made of stocks that hardly trade (median
+daily volume of a candidate: USD 5,636), and the large universe is the
+realistic one.
+
+**The freeze.** The rules are written in the freeze record with the hash of
+every code file, of every input and of the forecasts; the scripts that read
+1993–2025 refuse to run unless everything matches, never overwrite a result
+and log each opening (`scripts/backtest/freeze_guard.py`). The trials made on
+the development years are listed in the record (the order cap).
+
+**Audits of the backtest.** The separate agent rewrote the monthly step on its
+own: same weights, cash and record to 1e-14 on synthetic scenarios and on the
+real inputs of 1981–1992, no look-ahead. Astra then refused the freeze as it
+stood, rightly: the guards protected the script that runs, not its inputs nor
+its utilities, and a second run could have overwritten the first result. This
+was corrected before any opening. From the two audits, kept as rules: value
+weights, with the concentration reported (one stock weighs up to 32 % of the
+fund on 1981–1992, about 50 effective stocks); a closing trade price required
+for a fill, which makes NASDAQ stocks impossible to trade before November 1982
+(National Market) or June 1992 (SmallCap), a limit of the data; the cap of
+10 % named a capacity scenario, with 1 % next to it. Added before the freeze:
+one conditional diagnostic for the main result, because the share of the fund
+that is invested rises during the test period and a regression with constant
+betas is then misspecified (Ferson and Schadt 1996, to check). Postponed and
+declared: the factors rebuilt from our data (D20). Details: `SignalSpec.md`,
+section 6.
 
 ## 9. Limits to disclose in the report
 
