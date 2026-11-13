@@ -4,6 +4,7 @@ scripts/predictions/*.py text eol=lf
 scripts/portfolio/*.py text eol=lf
 scripts/backtest/*.py text eol=lf
 resources/signal_list.csv text eol=lf
-resources/strategy_freeze.json text eol=lf
-resources/test_openings.jsonl text eol=lf
-resources/test_steps/*.json text eol=lf
+# The records of the freeze and of the test runs are kept byte for byte.
+resources/strategy_freeze.json -text
+resources/test_openings.jsonl -text
+resources/test_steps/*.json -text
