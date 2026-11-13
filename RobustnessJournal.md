@@ -18,14 +18,17 @@ then audits.
   foreseen from numbers already read: the break-even of test 2 is close to
   gross alpha / (gross alpha − net alpha) of the test (0.343 and 0.449 against
   0.344 and 0.450 measured). The reading rules of section 1 are therefore a
-  discipline of writing, not a pre-registration. They ask whether the negative conclusion depends on a choice of
-  ours; none of them can become a new main result.
+  discipline of writing, not a pre-registration.
+- The tests ask whether the negative conclusion depends on a choice of ours;
+  none of them can become a new main result.
 - The frozen chain is not edited. The tests import the frozen monthly step
   (`scripts/backtest/2_backtest.py`) unchanged and change only what is passed
   to it. With the frozen parameters each test must reproduce the test result
   month by month, or it stops.
 - Script: `scripts/robustness/1_robustness_tests.py`. Outputs:
-  `reports/robustness/`.
+  `reports/robustness/`. Figures: `scripts/robustness/2_robustness_figures.py`
+  → `reports/figures/R_decile_returns.png`, `R_cost_multiplier.png`,
+  `R_capital.png`. Short note for the team: `reports/results_robustness_A.md`.
 - Units: returns and alphas in % a year (monthly value × 12); t-statistics in
   parentheses, Newey-West with 6 lags, as in the test; costs in basis points
   of the fund a month.
