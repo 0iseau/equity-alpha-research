@@ -36,6 +36,7 @@ disclose · 10 Open items · 11 Incidents and lessons · 12 Sources to verify ·
 | 2026-11-04 | **Restart** (commit `eda4453`): the old audit is abandoned (still in Git). `ProjectWorkflow.md` written. Roles change: **Claude develops, Astra only audits.** |
 | 2026-11-11 | Old scripts `data_cleaning.py` and `monthly_repetitions.py` and their outputs deleted; cleaning restarts from zero under `CleaningSpec.md` (JKP and Tidy Finance as references). Steps 1 to 10 implemented and audited one by one in the day. Scripts moved to `scripts/data_download/` and `scripts/data_cleaning/`. Repository switched to English. Git incident (section 11). |
 | 2026-11-12 | Step 9 audit handled. Whole chain rerun from raw files, reproducibility defect fixed. Final audit of the cleaning, alignment on the references, counter-audit. Backtest rules D12–D21 validated by Danny; `ret_d1` added. Astra's audit of the backtest rules (verdict "to review", no defect in the cleaned data) handled; final rules validated by Danny (section 8.4). **Cleaning closed.** |
+| 2026-11-13 | Signals: `3_signal_panel.py` written (join at the formation date, 23 market-scaled characteristics, ranks); data dictionary extended to the signal tables; audit by the separate agent (full recomputation, no difference), then lightened audit by Astra ("ready with reservations"); rule D26 and a dating test added. Ranks over the whole universe decided by Danny. **Signals closed** (section 8.6). |
 | 2026-11-13 (evening) | Deadline of the project. |
 | 16 Nov, 23 Nov, 7 Dec 2026 | Project presentation sessions. |
 
@@ -617,6 +618,14 @@ WRDS files and the five French files rechecked on 2026-11-12.
 | 8 | `8_accounting_availability.py` | `87be465f4640` |
 | 9 | `9_crsp_daily_agg.py` | `7e9f0ff3a802` |
 
+| Signals 1 | `signals/1_price_signals.py` | `212e648e3d9d` |
+| Signals 2 | `signals/2_accounting_signals.py` | `2a6170765a81` |
+| Signals 3 | `signals/3_signal_panel.py` | `ff5eda29ad08` |
+
+Script 3 was run twice in a row after its last change: same SHA-256 for
+`signal_panel.parquet` (`0f078361…e3b462`) and `signal_ranks.parquet`
+(`c49d9e1b…2ca4be`). It takes about 7 minutes.
+
 Run ids quoted in older documents are superseded. Scripts run from `Project/`,
 one at a time, for example `python scripts/data_cleaning/4_crsp_size.py`.
 
@@ -637,6 +646,9 @@ one at a time, for example `python scripts/data_cleaning/4_crsp_size.py`.
 | D11 | Step 9 reduced to volatility, beta, dollar volume, spreads | Deadline; only what a signal or the cost model needs | Full JKP list |
 | D12 | Keep accounting signals despite restatements; never call the bias small; versions A and B | See below | Point-in-time data; no accounting signals |
 | D13–D21 | Backtest rules | Section 8.2 | Astra's proposals, section 8.1 |
+| D24 | A window with a missing month gives no value | "Missing stays missing"; both audits | Index carried over the gap (JKP) |
+| D25 | The flow items of a transition fiscal year are missing | A flow over less than 12 months is not an annual flow | Use it as it is (JKP) |
+| D26 | The 23 market-scaled characteristics are missing when the CRSP company of the month is linked to several Compustat companies | The accounts of one part would be divided by the market value of the whole (tracking stocks); 2,231 eligible formations | Largest company value by `gvkey` (JKP) |
 
 **Rule D12 in full.** The restatement bias cannot be measured with our data, so
 we never say it is negligible; we show that the conclusion does not depend on
@@ -942,10 +954,92 @@ to Claude's reasoning), handles its findings, and only then writes a lightened
 prompt for Astra, which remains the audit that closes a step.
 
 **Decisions** (`SignalSpec.md`, section 7). Scope of the daily
-characteristics: decided, 15 added (above). Two wait for Danny, with Claude's
-recommendation in brackets: traditional model (penalised regression out of
-sample; the signed equal-weight score only as a retrospective benchmark);
-sector neutrality (constraint on portfolio weights, 12 Fama-French industries).
+characteristics: decided, 15 added (above). Ranks over the whole universe:
+decided on 2026-11-13 (section 8.6). Still open: the models (section 8.6) and
+the constraint on portfolio weights by industry (12 Fama-French industries,
+tolerance), to fix with the portfolio rules.
+
+### 8.6 Signals: the panel, the ranks and the closing of the step (2026-11-13)
+
+**What was built.** `scripts/signals/3_signal_panel.py` gives two tables, both
+sorted by (`yyyymm`, `permno`):
+
+- `signal_panel.parquet`: raw values of the 194 characteristics, one row per
+  stock-month of the panel (5,210,894 rows; 59 of version A, 135 added by
+  version B, of which 23 need a market value);
+- `signal_ranks.parquet`: the 3,805,426 eligible stock-months, with one rank in
+  [−1, 1] and one missing flag per characteristic.
+
+The tables are about 3 GB each and do not fit in memory at once: the script
+works by blocks of five years, and any later script must read them by columns
+or by months.
+
+**Rules** (`SignalSpec.md`, section 4.3).
+
+- Accounting characteristics reach a stock-month only through `acc_datadate` of
+  the panel (accounts 6 to 18 months old, D4), never by the month of the fiscal
+  year end.
+- The 23 market-scaled characteristics use the market value of the company at
+  month t, only when every share class has a value (60 eligible formations
+  without it, 3 of them with accounts).
+- Ranks (D18): by month, over the eligible stocks only, average rank for ties,
+  `s = 2(r − 1)/(n − 1) − 1`; a missing value gets 0 and a flag of 1.
+- **Ranks over the whole universe, not inside industries** (Danny, 2026-11-13).
+  Reasons written before any return was looked at: it is the rule of Gu, Kelly
+  and Xiu; a rank inside an industry would remove the differences between
+  industries, which a model may use, and would be noisy in small industries; it
+  would not make the portfolio neutral anyway.
+- **D26** (confirmed by Danny on 2026-11-13, after the audit by Astra): when the
+  CRSP company of the month is linked to several Compustat companies (tracking
+  stocks such as the Liberty groups), the 23 market-scaled characteristics are
+  missing, because the accounts of one group would be divided by the market
+  value of all groups. 2,231 eligible formations with accounts, 26 CRSP
+  companies. Reference case: PERMNO 15997 (Braves Group), April 2023.
+
+**How it was checked.**
+
+- Acceptance cases of the specification: 11 of 11 within 1e-8 for PERMNO 12490
+  at 2000-12. The accounts of fiscal year 1999 are attached from 2000-06 to
+  2001-05 and in no other month.
+- At 1975-06, 1999-12 and 2015-03: same output when all sources end at the date
+  (panel, market characteristics, accounts closed at most 6 months before);
+  version A unchanged without any account or link; ranks unchanged when stocks
+  that are not eligible change; ranks recomputed with scipy (largest gap 3e-8,
+  the precision of the stored ranks). Each test has a counter-test that shows it
+  can fail.
+- **Separate audit agent** (blank context): both tables recomputed in full with
+  its own code, every month from 1930 to 2025: no difference in values, missing
+  values, ranks or flags. No blocking finding; its findings on traceability, on
+  the name of a test and on the dictionary were corrected.
+- **Lightened audit by Astra**: "ready with reservations", no blocking finding;
+  two stock-months that nobody had used recomputed exactly. Its two important
+  findings gave rule D26 and the test with sources that end at the date.
+- After D26, a comparison column by column with the run before: only the 23
+  market-scaled characteristics, their ranks and their flags changed.
+
+Details and the tables of findings: `SignalSpec.md`, sections 8e and 8f.
+
+**To know for the models.** Lowest coverage among eligible stock-months since
+1963: `pstk_gr3` 11.8 %, `pstk_gr1` 13.6 %, `seas_16_20na` 22.3 %; their rank is
+0 with a flag of 1 almost everywhere, so a model can learn from the flag
+(availability, age of the listing). `chcsho_1m` has only 12 distinct values in
+its worst month. Two checks suggested by Astra were not done: by decade, the
+share of the variance of the ranks explained by industry means (descriptive,
+for the report), and a comparison with and without the flags on the validation
+sample (to decide with the method).
+
+**No return of a strategy, of a portfolio or of a sorted group was looked at
+during this step.**
+
+**Aim of the project, as Danny restated it on 2026-11-13.** The committee does
+not expect a research question that compares machine learning with econometric
+models; that framing came from an adviser who did not have the whole context.
+The aim is to look for alpha as realistically as possible (no look-ahead, no
+survivorship bias, costs), and not finding any is a result. The choice of the
+method can be justified by theory and by the literature; a benchmark model
+whose only purpose is to show what machine learning adds is not required. The
+choice of the models is therefore still open, and section 6 of `SignalSpec.md`
+is to be reread with this in mind before the first estimation.
 
 ## 9. Limits to disclose in the report
 
@@ -964,6 +1058,8 @@ sector neutrality (constraint on portfolio weights, 12 Fama-French industries).
 10. `eligible` does not guarantee execution: stale prices, zero volume.
 11. The backtest rules rest on abstracts and summaries read on 2026-11-12:
     every quoted figure must be checked in the paper.
+12. Companies with tracking stocks have no market-scaled characteristic (D26);
+    characteristics with low coverage get a neutral rank and a flag (D18).
 
 ## 10. Open items (2026-11-12)
 
@@ -977,8 +1073,8 @@ sector neutrality (constraint on portfolio weights, 12 Fama-French industries).
    month, security or company market equity for book-to-market, 12-month
    comparisons on the same `gvkey`, exact content of versions A and B,
    sensitivity tests (D3 at −55 %, 12-month lag, French breakpoints, costs).
-4. **No signal is chosen yet.** Danny asked not to start the signals before
-   validating the rest.
+4. Signals: **closed on 2026-11-13** (section 8.6). Next: choice of the
+   models, then predictions.
 5. Then: signals → portfolios → backtest with costs → alphas (CAPM, FF3, FF5,
    q, q5; t-tests, GRS) → robustness → freeze → single out-of-sample test →
    report (20 pages) and slides.
