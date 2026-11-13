@@ -942,6 +942,124 @@ shown if nano-cap costs change the conclusion (the cap removes 563,008 quotes).
 blocking findings and the three others are fixed; the fixes are checked in the
 final audit).
 
+**Columns added for the signals (2026-11-12, run `623b969a3624`).** Step 9 was
+reopened once, by decision of the project owner, to compute the daily inputs of
+15 JKP characteristics that the reduced scope (D11) had left out. The decision
+was taken before any signal or return was computed. New columns of
+`crsp_daily_agg.parquet` (JKP code copied; windows, minimum observations and
+guards as in the rest of the step):
+
+| Column | JKP function | Definition |
+|---|---|---|
+| `rmax1_21d`, `rmax5_21d` | `rmax` | Highest daily return of the month, and mean of the five highest; at least 15 returns; same guards as `rvol_21d`. |
+| `rvolhl_21d` | `compute_bidask_spread` | Monthly mean of the volatility that comes out of the Corwin-Schultz computation; same day filter as `bidaskhl_21d`. |
+| `ami_126d` | `ami` | Mean of `|ret| / dollar volume × 1e6` over 6 months; at least 60 returns and 60 dollar volumes; a zero dollar volume gives no ratio. |
+| `dolvol_var_126d` | `dolvol` | Standard deviation over mean of the daily dollar volume, 6 months, at least 60 days; missing when the volume is constant. |
+| `prc_highprc_252d` | `prc_to_high` | Last split-adjusted price over the highest one, 12 months; at least 120 returns and 120 adjusted prices. |
+| `cfacshr_mth` | `gen_crsp_sf` | Cumulative share factor (`DlyCumFacShr`) on the date of the monthly CRSP row. Our monthly export has no `MthCumFacShr`. |
+
+- **The old columns are unchanged**: the 17 columns published before are equal,
+  value for value, to those of run `86a807cdfece` (4,891,218 rows).
+- **Second route** (101 stocks, statistics recomputed on the daily rows of each
+  window): no difference in missing values; largest relative gap 1.7e-12.
+- **Seventeen reference values** computed apart with pandas, sharing no code
+  with the script (Apple, August 2020, with its 4-for-1 split; IBM, May 1999,
+  with its 2-for-1 split; Microsoft, March 2015): all equal within 1e-9.
+- **Test of the share factor.** On 4,695,129 pairs of consecutive months, the
+  price divided by the factor moves like the CRSP return without dividends
+  (`retx`) within 0.001 on 99.73 %. On the 36,056 months where the factor
+  changes, the match is 99.46 % with the factor and 0.09 % without it: the
+  factor of the monthly date is the right one.
+- Coverage among eligible stock-months since 1963, by count: `rmax` 96.6 %,
+  `prc_highprc_252d` 95.8 %, `dolvol_var_126d` 89.8 %, `ami_126d` 88.9 %,
+  `rvolhl_21d` 86.0 %, `cfacshr_mth` 100 %.
+- **Restricted use of `cfacshr_mth`**: only as a ratio between two dates of the
+  same stock. Its level is today's vintage and depends on later splits.
+- Inherited deviations, as for the other columns of this step: Ken French
+  market calendar and risk-free rate, the 14-day rule on returns, a value only
+  for a month where the stock has daily rows.
+- Still left out, as a choice of scope: daily regressions and moments against
+  the market, turnover and zero-trade days (`resources/signal_exclusions.csv`).
+- Data dictionary: 155 columns.
+
+**Corrections after the Astra audit of the addition (2026-11-12, verdict "to
+review", run `7e9f0ff3a802`).** The six daily statistics were confirmed (18 values
+recomputed by the auditor from the raw CSV, largest gap 3e-16) and the file was
+reproduced. One blocking finding, on the share factor:
+
+- **The CRSP cumulative share factor is today's vintage, exported with 12
+  decimals.** After many later reverse splits its level is rounded, down to zero.
+  PERMNO 12350: eleven reverse splits from 2016 to 2025, factor exported as zero
+  from 2010 to 2024. The split-adjusted price was then missing, and with it
+  `prc_highprc_252d`, `rvolhl_21d` and `bidaskhl_21d`: a missing value caused by
+  events that come after the formation date. Exposure among eligible
+  stock-months since 1963: 143 with a zero factor (one stock); 2,255 with a
+  level below 1e-6 (27 stocks).
+- **Fix: a local share factor that only knows the past**
+  (`local_share_factor`). It is 1 on the first daily row of the stock. Each day
+  it is multiplied by the ratio of the CRSP levels of the day and of the day
+  before when both are at least 1e-6 (the ratio is then precise to 2e-6).
+  Otherwise it uses the dated share events of the distribution file. It
+  replaces the CRSP factor in every computation of this step (adjusted prices of
+  the high-low estimator and of `prc_highprc_252d`, and `cfacshr_mth`).
+- **Which events move the factor.** On 36,809 days where the CRSP factor changes
+  between two precise levels, the product of `1 + DisFacShr` of the events of
+  type FRS (stock splits and stock dividends) gives the change within 1e-4 on
+  36,798; the other event types that carry a share factor (mergers, spin-offs,
+  offers) do not move it. Only FRS events are used. An event goes to the first
+  daily row on or after its ex-date.
+- Several FRS events on one ex-date add up in CRSP (`1 + sum of DisFacShr`),
+  they do not multiply (finding of the separate audit agent; 9 ex-dates).
+- Counts of the run: 37,059 factor changes taken from precise levels; 95 taken
+  from dated events (45 stocks); 5 precise changes that the events do not give
+  within 1e-4 (two without any event, three extreme reverse splits whose event
+  has 6 decimals): the CRSP level is followed, and the script stops above 5.
+- **Vintage test.** On 109 stocks (the sample of the direct check, plus the
+  stocks with several events on one day), two later vintages are simulated:
+  levels divided by 1e7, and by 1e13 (247,176 of 266,725 levels rounded to
+  exactly zero, so that only the dated events are left). In both, the local
+  factor has the same missing values and every stock stays within 1e-4 (largest
+  gap 4.5e-6).
+- **Effect on the columns already published**: 13 of the 17 older columns are
+  unchanged value for value. `bidaskhl_21d`, `n_spread_hl_21d` and
+  `n_hl_observed_21d` change for the stocks with a rounded factor: 250
+  stock-months get a value (2 stocks), 18 values move by more than 1e-9 (11
+  stocks). `prc_highprc_252d`: 250 values gained, 102 move by more than 0.1 %
+  (36 stocks). The other differences are below 1e-9 (order of the arithmetic).
+  `bidaskhl_21d` is an input of the cost rule D14: the change corrects it.
+- **Vintage test extended after the lightened Astra audit.** It also rebuilds
+  the columns that use the factor (`bidaskhl_21d`, `rvolhl_21d`,
+  `prc_highprc_252d`, `n_hl_observed_21d`). On the 109 regular stocks, in both
+  simulated vintages: no difference in missing values, largest gap 5e-6.
+- **Declared limit: five stocks.** Five changes of the CRSP factor are not given
+  by the dated events (PERMNO 30920 on 1963-11-12 and 55555 on 1991-06-17 have
+  no event; 13013, 18556 and 23628 have an extreme reverse split whose event has
+  6 decimals). Today the CRSP level is precise there and is followed. In a later
+  vintage where it would no longer be precise, the local factor of these five
+  stocks would change: in the simulation, 14 values of `prc_highprc_252d` and
+  one of each high-low column move by more than 0.1 %, with no change in missing
+  values. The list is in the report (`unexplained_factor_changes`); the script
+  stops if it grows beyond five.
+- **Limit**: the dated events have 6 decimals; for an extreme reverse split the
+  ratio taken from an event is precise to about 1e-4 at best. Events are used
+  only where the CRSP level is not precise.
+- Reference cases added (auditor): PERMNO 12350, November 2012,
+  `prc_highprc_252d` = 0.4462151394 and `rvolhl_21d` = 0.0691384712; the 18
+  values of PERMNO 37022 (1978-12), 10002 (1994-04) and 10107 (2001-03).
+- **Scope of the `retx` test (finding 2).** The test shows that the factor of
+  the monthly date explains split months (99.48 % of 36,064 with the factor,
+  0.09 % without). It does not prove equality with CRSP's monthly factor, which
+  is not in our export. Of the 195 failures of the previous run, the auditor
+  explained 128 by distributions whose price factor differs from the share
+  factor, 26 by a price dated before the month end, and 41 remain open; none
+  points to a wrong date.
+- **Variance of the dollar volume (finding 6).** It is now rebuilt from the
+  monthly means and centred sums of squares, without subtracting two large sums
+  of squares. 71 values moved by more than 1e-9 (largest 1.6e-8).
+- The bound on `prc_highprc_252d` now allows zero, as JKP does (no value is zero).
+- `cfacshr_mth` has the role `transform_input` in the dictionary: only inside
+  `chcsho_*` and `div*_me`, never as a level, a rank or a missing flag.
+
 ### Step 10: extreme values
 
 - **No winsorisation** of portfolio returns.
