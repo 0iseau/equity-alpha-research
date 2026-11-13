@@ -535,8 +535,9 @@ for factor regressions is a choice for the alpha step.
 ## 5. Data dictionary
 
 `resources/data_dictionary.csv`: one row per column of the seven cleaned tables
-(**148 columns**; 144 at the end of the cleaning, 146 after the final audit, 147
-with `ret_signal_ok`, 148 with `ret_d1`): meaning, unit,
+(**155 columns**; 144 at the end of the cleaning, 146 after the final audit, 147
+with `ret_signal_ok`, 148 with `ret_d1`, 155 with the seven columns added to
+step 9 for the signals): meaning, unit,
 source, **availability** (`key`, `t`, `interval`, `acc_6m`, `t+1`, `after_t`,
 `today`) and **roles** (`identifier`, `universe`, `predictor`, `outcome`,
 `benchmark`, `execution_cost`, `weight`, `audit`).
@@ -614,7 +615,7 @@ WRDS files and the five French files rechecked on 2026-11-12.
 | 6 | `6_ccm_links.py` | `90aff624d621` |
 | 7 | `7_compustat_annual.py` | `a20b514d1dab` |
 | 8 | `8_accounting_availability.py` | `87be465f4640` |
-| 9 | `9_crsp_daily_agg.py` | `86a807cdfece` |
+| 9 | `9_crsp_daily_agg.py` | `7e9f0ff3a802` |
 
 Run ids quoted in older documents are superseded. Scripts run from `Project/`,
 one at a time, for example `python scripts/data_cleaning/4_crsp_size.py`.
@@ -771,10 +772,11 @@ price.
 (otherwise the net result starts after May 1975); the q and q5 factors; the
 choice of the signals and the exact content of versions A and B.
 
-### 8.5 Signals: list and construction plan (2026-11-12, not built yet)
+### 8.5 Signals: list, construction plan and first two scripts (2026-11-12)
 
-Full text: `SignalSpec.md`. List: `resources/signal_list.csv`, produced and
-checked by `scripts/signals/0_signal_list.py`.
+Full text: `SignalSpec.md` (version 0.3). Register: `resources/signal_list.csv`
+and `resources/signal_exclusions.csv`, produced and checked by
+`scripts/signals/0_signal_list.py`.
 
 **Danny's requirement.** The list must be one that is historically known to hold
 the information needed to find alpha, either from the literature or from an
@@ -786,43 +788,164 @@ alternative data); compare a traditional multi-factor model with machine
 learning (XGBoost, LightGBM, neural networks); neutralise sector and factor
 exposures; judge out of sample after trading costs.
 
-**Selection rule (the argument for the report).** A characteristic of the JKP
-library (the census of published signals, whose code we already follow) is kept
-if and only if every input of its JKP formula exists in our cleaned tables. The
-only criterion is data availability; a fallback is accepted only if it is a
-Compustat identity; an item absent from our extract is never treated as zero.
-The list was fixed before any signal or return was computed.
+**Selection rule (the argument for the report).** Each of the 404
+characteristics of the JKP library (code at commit `b5695ea`) gets a decision
+and a reason. A characteristic is kept when its JKP formula (annual US branch)
+can be computed from the final cleaned tables. The criterion is data
+availability only, fixed before any signal or return was computed. An item
+absent from our extract is unknown, never zero.
 
-**Result: 176 of the 404 JKP characteristics.** Version A (price and trading
-data only, rule D12): 42 (momentum 13, short-term reversal 1, long-term reversal
-12, seasonality 5, low risk 3, size and liquidity 4, equity net payout 4).
-Version B adds 134 accounting characteristics (investment 37, financial strength
-27, fundamental momentum 16, profitability 15, issuance 14, value 13, size 5,
-operating efficiency 4, low risk 2, earnings quality 1).
+**What we claim, and what we do not.** We apply the JKP formulas to our annual
+US extract; we do not claim to reproduce the JKP data set (JKP also use
+quarterly and global files and their own market factors). Each accounting
+characteristic carries a branch label: 27 where every item of every JKP branch
+is in our extract; 82 where the first choice is, but a fallback is not (lower
+coverage possible); 26 where the JKP first choice (`gp`, `xopr`, `ebitda`) is
+absent and the Compustat definition is used (`sale - cogs`, `cogs + xsga`,
+`oibdp`). Evidence for these 26: the joint identity fails on 421 of 256,728
+rows (0.16 %).
+
+**Result: 404 = 194 kept + 195 excluded for lack of data + 15 excluded by
+scope.** Version A (market data only, rule D12): 59 (momentum 14, short-term
+reversal 1, long-term reversal 12, seasonality 5, low risk 9, size and
+liquidity 6, issuance 8, dividend yields 4). Version B adds 135 accounting
+characteristics (investment 37, financial strength 27, fundamental momentum 16,
+profitability 15, issuance 14, value 14, size 5, operating efficiency 4, low
+risk 2, earnings quality 1).
+
+**Step 9 reopened once for the signals (2026-11-12, decision of Danny).** The
+audit showed that 30 characteristics were computable from the daily file but
+left out by the reduced scope of step 9 (D11). Version A is the main conclusion
+(D23) and had 44 characteristics, 31 of them windows of the same monthly
+returns. Danny chose to add the 15 that need no regression against the market:
+share changes, dividend yields, maximum returns, Amihud illiquidity,
+dollar-volume variability, 52-week high, high-low volatility. The decision was
+taken before any signal or return was computed; stopping at 15 rather than 30
+is a choice made for the deadline, and the other 15 are reported as a choice of
+scope. Controls of the addition (`CleaningSpec.md`, step 9): old columns
+unchanged value for value; second route on 101 stocks; 17 reference values
+computed apart in pandas, including two split cases; and a test of the share
+factor (on the 36,056 months where it changes, the adjusted price matches the
+return without dividends in 99.46 % of cases, against 0.09 % without the
+factor). The cumulative share factor is today's vintage: it is only used as a
+ratio between two dates of the same stock.
 
 **What we cannot build, to state plainly**: earnings revisions (no analyst
 forecasts) and alternative data, two families the adviser names; accruals, cash
-flows, R&D and quality composites (our Compustat extract has 21 items);
-quarterly characteristics; most low-risk and trading characteristics (step 9
-reduced, D11).
+flows, R&D and quality composites (21 Compustat items); quarterly
+characteristics. The loss of predictive power from these families is not
+identified. Coverage is uneven (37 investment characteristics; 31 of the 44 of
+version A are windows of the same monthly returns): weights by theme and
+correlations are reported.
 
-**Construction plan**: three scripts copying the JKP functions (price signals;
-accounting signals on a complete monthly grid per company; panel with
-market-scaled characteristics and ranks in [-1, 1], missing = 0 with a flag),
-with a truncation test, a delisting-invariance test, hand-written reference
-cases and negative tests.
+**Construction plan**: three scripts copying the JKP functions (market signals;
+accounting signals on a complete month grid per company; panel with
+market-scaled characteristics and ranks in [-1, 1], missing = 0 with a flag).
+Returns are masked by `ret_signal_ok` before any cumulative product. Stopping
+checks: version A unchanged when all accounts are removed, truncation and
+perturbation tests, acceptance cases, negative tests.
 
-**Method** (Gu, Kelly and Xiu, 2020): target `ret_exc_lead1`; equal-weight
-average of signed ranks, penalised linear regression, gradient-boosted trees;
-training 1963-1980, validation 1981-1992, test 1993-2025 (GKX proportions; the
-test period is the sub-period of D23).
+**Method** (Gu, Kelly and Xiu, 2020): target `ret_exc_lead1`; penalised linear
+regression and gradient-boosted trees, estimated on 1963-1980, validated on
+1981-1992, tested on 1993-2025 with a yearly refit (GKX lengths 18 / 12 / rest;
+the test period is the sub-period of D23, by arithmetic, written before any
+result).
 
-**Status**: audit of the list and the plan requested from Astra
-(`audit/AUDIT_signaux_liste_et_plan_pour_Astra.md`). Open points: sector
-neutrality and industry grid (D8), `chcsho_*`, sign of each characteristic,
-construction check against the Ken French factors. The exclusions were judged
-by reading the JKP code, not by an exhaustive automatic parse: the audit must
-check the list in both directions.
+**Audit by Astra (2026-11-12, verdict "to review", four blocking findings), all
+handled in the list and the plan:**
+
+1. the script only checked the names it kept → register of the 404, with
+   `eq_dur`, `beta_60m` and `ivol_capm_60m` added (176 → 179);
+2. 26 names rest on an absent first choice, other chains lose a fallback → rule
+   rewritten, branch labels, no claim of exact replication;
+3. the return index was not defined and could let a delisting return in → both
+   indices built from the masked return;
+4. the JKP signs (v1.0, 2026-10-28) were set with US data from 1972 to 2025,
+   which covers the test → decision below.
+
+Also fixed: exact guards of the JKP divisions (the plan wrongly said "negative
+denominator → missing"), rank conventions for ties and empty months, deviations
+on the company market value, counts on 404 names, role `predictor` for
+`bidaskhl_21d`. The auditor recomputed 11 acceptance values (PERMNO 12490,
+December 2000), now in `SignalSpec.md`, section 5, and found reference papers
+on long-only US portfolios with machine learning (Esakia and Goltz, 2025;
+Simon, Weibels and Zimmermann, 2026; Li, Wu and Zhou), not read by us yet.
+
+**Scripts 1 and 2 built (2026-11-12, evening).** Danny chose to start the
+build while Astra was still auditing the addition to step 9, to save time: the
+code and its checks stay valid, and a correction of step 9 would only mean
+running the scripts again. Two safeguards: nothing is declared closed before the
+audits are back, and no return of a strategy or of a sorted portfolio is looked
+at. `1_price_signals.py` gives the 59 market characteristics of version A
+(run `212e648e3d9d`); `2_accounting_signals.py` gives 112 of the 135 accounting
+characteristics (run `2a6170765a81`); the 23 others need the market value and belong to
+script 3. Evidence, for the report: the 14 acceptance values recomputed by the
+auditor are matched within 1e-8; a second route in plain numpy or Python finds
+no difference in missing values and gaps below 2e-12; hiding the data after
+1975-06, 1999-12 or 2015-03 leaves the earlier signals identical; replacing a
+masked delisting return changes no signal, and the test was shown to detect the
+change when the mask is removed; two runs give the same files. Details:
+`SignalSpec.md`, section 4.5.
+
+**Astra's audit of the step 9 addition (2026-11-12, "to review") and the local
+share factor.** The six daily statistics were confirmed by an independent
+recomputation from the raw CSV. One blocking finding, worth explaining in the
+report as an example of a subtle look-ahead: the CRSP cumulative share factor is
+today's vintage, exported with 12 decimals. For a stock that later goes through
+many reverse splits, the factor of earlier dates is rounded, down to zero, and
+the split-adjusted price (so the 52-week-high ratio, the high-low spread and
+volatility, share changes and dividend yields) was missing **because of events
+that happened after the formation date**. Exposure was small (143 eligible
+stock-months with a zero factor, 2,255 with a level below 1e-6, out of 3.45
+million) but it was a leak of future information through missing values, which
+rule D18 turns into a flag that a model can read. Fix: step 9 builds a local
+factor that starts at 1 and only uses past information (ratios of CRSP levels
+when they are precise, dated split events otherwise). Evidence: only splits and
+stock dividends move the CRSP factor (36,798 of 36,809 days); a simulated later
+vintage leaves the local factor unchanged within 4.5e-6 and changes no missing
+value; the auditor's reference cases pass. The correction also changed the
+high-low spread of the cost rule for 11 stocks. Details: `CleaningSpec.md`,
+step 9, and `SignalSpec.md`, section 8b.
+
+**First audit by the separate agent (2026-11-12).** Verdict "ready with
+reservations", no blocking finding. With its own code it recomputed 22 market
+columns and 116 accounting columns on the whole universe and the local share
+factor of all 40,058 stocks: no difference. It found a wrong rule without
+effect today (two share events on the same day add up in CRSP, the code
+multiplied them), a test that was too loose, and rounding noise in the share
+changes that ranks would have amplified: all three fixed, step 9 output
+unchanged. It also listed JKP conventions that count a missing month as "no
+change" and the effect of changes of fiscal year end: kept as in JKP, counted,
+declared, and put to Astra. Details: `SignalSpec.md`, section 8c.
+
+**Lightened Astra audit (2026-11-12, "ready with reservations") and decisions
+D24 and D25.** Astra confirmed the local share factor, the reading of DuckDB's
+discrete quantile, and six values recomputed on stocks nobody had used (gap
+2e-16). Two conventions of the JKP code were then replaced by stricter project
+rules, on the recommendation of both audits and in line with "missing stays
+missing": **D24**, a momentum, reversal, net-payout or dividend-yield window
+gives no value when one of its months is missing (JKP treats the month as a zero
+return or skips it; coverage of 12-month momentum goes from 91.6 % to 91.1 % of
+eligible stock-months); **D25**, the income and cash-flow items of a transition
+fiscal year (a year that ends less than 12 months after the previous report,
+1,100 reports, all with a new fiscal-year-end month) are missing, because a
+9-month flow is not an annual flow (GVKEY 001076: sales "growth" of 53.9 %
+against a 9-month year). Both applied before any return was looked at; confirmed
+by Danny on 2026-11-13 ("for now"). One limit stays declared: for the few changes of the CRSP
+share factor that have no dated event, a later data vintage could change the
+local factor. Details: `SignalSpec.md`, section 8d.
+
+**Audit workflow from now on (Danny, 2026-11-12).** Each Astra audit uses about
+half of Astra's token budget. So every audit has two stages: Claude first
+launches a separate audit agent with a fresh context (read-only, with no access
+to Claude's reasoning), handles its findings, and only then writes a lightened
+prompt for Astra, which remains the audit that closes a step.
+
+**Decisions** (`SignalSpec.md`, section 7). Scope of the daily
+characteristics: decided, 15 added (above). Two wait for Danny, with Claude's
+recommendation in brackets: traditional model (penalised regression out of
+sample; the signed equal-weight score only as a retrospective benchmark);
+sector neutrality (constraint on portfolio weights, 12 Fama-French industries).
 
 ## 9. Limits to disclose in the report
 

@@ -1,177 +1,195 @@
-characteristic,theme,version,table,inputs,jkp_function
-eqnpo_12m,Issuance,A,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
-eqnpo_1m,Issuance,A,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
-eqnpo_3m,Issuance,A,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
-eqnpo_6m,Issuance,A,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
-ret_24_12,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_36_1,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_36_12,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_48_1,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_48_12,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_60_1,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_60_12,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_60_36,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-seas_11_15na,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_16_20na,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_2_5na,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_6_10na,Long-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-beta_252d,Low risk,A,crsp_daily_agg,beta_252d,roll_apply_daily / bidask_hl (step 9)
-rvol_21d,Low risk,A,crsp_daily_agg,rvol_21d,roll_apply_daily / bidask_hl (step 9)
-rvol_252d,Low risk,A,crsp_daily_agg,rvol_252d,roll_apply_daily / bidask_hl (step 9)
-ret_12_0,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_12_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_12_7,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_18_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_24_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_2_0,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_3_0,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_3_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_6_0,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_6_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_9_0,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-ret_9_1,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-seas_1_1na,Momentum,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_11_15an,Seasonality,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_16_20an,Seasonality,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_1_1an,Seasonality,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_2_5an,Seasonality,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-seas_6_10an,Seasonality,A,crsp_panel_acc,ret;ret_signal_ok,seasonality
-ret_1_0,Short-term reversal,A,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
-bidaskhl_21d,Size,A,crsp_daily_agg,bidaskhl_21d,roll_apply_daily / bidask_hl (step 9)
-dolvol_126d,Size,A,crsp_daily_agg,dolvol_126d,roll_apply_daily / bidask_hl (step 9)
-market_equity,Size,A,crsp_panel_acc,me,market_chars_monthly
-prc,Size,A,crsp_panel_acc,prc,gen_crsp_sf
-ni_ar1,Earnings quality,B,compustat_annual,at;ib,earnings persistence
-at_be,Financial strength,B,compustat_annual,at;be_x,safe_div / temp_rat_other
-ca_cl,Financial strength,B,compustat_annual,act;lct,safe_div / temp_rat_other
-cash_at,Financial strength,B,compustat_annual,at;che,safe_div / temp_rat_other
-cash_cl,Financial strength,B,compustat_annual,che;lct,safe_div / temp_rat_other
-cash_gr1a,Financial strength,B,compustat_annual,at;che,chg_to_assets
-cash_gr3a,Financial strength,B,compustat_annual,at;che,chg_to_assets
-cash_lt,Financial strength,B,compustat_annual,che;lt,safe_div / temp_rat_other
-cash_me,Financial strength,B,compustat_annual,che;me_company,scale_me
-cash_mev,Financial strength,B,compustat_annual,che;dlc;dltt;me_company,scale_mev
-cl_lt,Financial strength,B,compustat_annual,lct;lt,safe_div / temp_rat_other
-debt_at,Financial strength,B,compustat_annual,at;dlc;dltt,safe_div / temp_rat_other
-debt_be,Financial strength,B,compustat_annual,be_x;dlc;dltt,safe_div / temp_rat_other
-debt_me,Financial strength,B,compustat_annual,dlc;dltt;me_company,scale_me
-debt_mev,Financial strength,B,compustat_annual,che;dlc;dltt;me_company,scale_mev
-debtlt_be,Financial strength,B,compustat_annual,be_x;dltt,safe_div / temp_rat_other
-debtlt_debt,Financial strength,B,compustat_annual,dlc;dltt,safe_div / temp_rat_other
-debtlt_mev,Financial strength,B,compustat_annual,che;dlc;dltt;me_company,scale_mev
-debtst_debt,Financial strength,B,compustat_annual,dlc;dltt,safe_div / temp_rat_other
-debtst_mev,Financial strength,B,compustat_annual,che;dlc;dltt;me_company,scale_mev
-int_debt,Financial strength,B,compustat_annual,dlc;dltt;xint,safe_div / temp_rat_other
-int_debtlt,Financial strength,B,compustat_annual,dltt;xint,safe_div / temp_rat_other
-netdebt_me,Financial strength,B,compustat_annual,che;dlc;dltt;me_company,scale_me
-nwc_at,Financial strength,B,compustat_annual,act;at;lct,safe_div / temp_rat_other
-pstk_gr1,Financial strength,B,compustat_annual,pstk_x,var_growth
-pstk_gr3,Financial strength,B,compustat_annual,pstk_x,var_growth
-pstk_mev,Financial strength,B,compustat_annual,che;dlc;dltt;me_company;pstk_x,scale_mev
-sale_nwc,Financial strength,B,compustat_annual,act;lct;sale,safe_div / temp_rat_other
-dgp_dsale,Fundamental momentum,B,compustat_annual,cogs;sale,chg_to_exp
-dsale_dsga,Fundamental momentum,B,compustat_annual,sale;xsga,chg_to_exp
-ebitda_gr1a,Fundamental momentum,B,compustat_annual,at;oibdp,chg_to_assets
-ebitda_gr3a,Fundamental momentum,B,compustat_annual,at;oibdp,chg_to_assets
-gmar_ch5,Fundamental momentum,B,compustat_annual,cogs;sale,chg_var1_to_var2
-gp_gr1a,Fundamental momentum,B,compustat_annual,at;cogs;sale,chg_to_assets
-gp_gr3a,Fundamental momentum,B,compustat_annual,at;cogs;sale,chg_to_assets
-gpoa_ch5,Fundamental momentum,B,compustat_annual,at;cogs;sale,chg_var1_to_var2
-ni_gr1a,Fundamental momentum,B,compustat_annual,at;ib,chg_to_assets
-ni_gr3a,Fundamental momentum,B,compustat_annual,at;ib,chg_to_assets
-nix_gr1a,Fundamental momentum,B,compustat_annual,at;ni,chg_to_assets
-nix_gr3a,Fundamental momentum,B,compustat_annual,at;ni,chg_to_assets
-ope_gr1a,Fundamental momentum,B,compustat_annual,at;oibdp;xint,chg_to_assets
-ope_gr3a,Fundamental momentum,B,compustat_annual,at;oibdp;xint,chg_to_assets
-roa_ch5,Fundamental momentum,B,compustat_annual,at;ib,chg_var1_to_var2
-roe_ch5,Fundamental momentum,B,compustat_annual,be_x;ib,chg_var1_to_var2
-at_gr1,Investment,B,compustat_annual,at,var_growth
-at_gr3,Investment,B,compustat_annual,at,var_growth
-be_gr1,Investment,B,compustat_annual,be_x,var_growth
-be_gr1a,Investment,B,compustat_annual,at;be_x,chg_to_assets
-be_gr3,Investment,B,compustat_annual,be_x,var_growth
-ca_gr1,Investment,B,compustat_annual,act,var_growth
-ca_gr3,Investment,B,compustat_annual,act,var_growth
-capex_abn,Investment,B,compustat_annual,capx;sale,compute_capex_abn
-capx_gr1,Investment,B,compustat_annual,capx,var_growth
-capx_gr1a,Investment,B,compustat_annual,at;capx,chg_to_assets
-capx_gr2,Investment,B,compustat_annual,capx,var_growth
-capx_gr3,Investment,B,compustat_annual,capx,var_growth
-capx_gr3a,Investment,B,compustat_annual,at;capx,chg_to_assets
-coa_gr1a,Investment,B,compustat_annual,act;at;che,chg_to_assets
-coa_gr3a,Investment,B,compustat_annual,act;at;che,chg_to_assets
-cogs_gr1,Investment,B,compustat_annual,cogs,var_growth
-cogs_gr3,Investment,B,compustat_annual,cogs,var_growth
-col_gr1a,Investment,B,compustat_annual,at;dlc;lct,chg_to_assets
-col_gr3a,Investment,B,compustat_annual,at;dlc;lct,chg_to_assets
-cowc_gr1a,Investment,B,compustat_annual,act;at;che;dlc;lct,chg_to_assets
-cowc_gr3a,Investment,B,compustat_annual,act;at;che;dlc;lct,chg_to_assets
-nca_gr1,Investment,B,compustat_annual,act;at,var_growth
-nca_gr3,Investment,B,compustat_annual,act;at,var_growth
-ncol_gr1a,Investment,B,compustat_annual,at;dltt;lct;lt,chg_to_assets
-ncol_gr3a,Investment,B,compustat_annual,at;dltt;lct;lt,chg_to_assets
-nwc_gr1a,Investment,B,compustat_annual,act;at;lct,chg_to_assets
-nwc_gr3a,Investment,B,compustat_annual,act;at;lct,chg_to_assets
-ol_gr1a,Investment,B,compustat_annual,at;dlc;dltt;lt,chg_to_assets
-ol_gr3a,Investment,B,compustat_annual,at;dlc;dltt;lt,chg_to_assets
-opex_gr1,Investment,B,compustat_annual,cogs;xsga,var_growth
-opex_gr3,Investment,B,compustat_annual,cogs;xsga,var_growth
-sale_gr1,Investment,B,compustat_annual,sale,var_growth
-sale_gr3,Investment,B,compustat_annual,sale,var_growth
-sga_gr1,Investment,B,compustat_annual,xsga,var_growth
-sga_gr3,Investment,B,compustat_annual,xsga,var_growth
-txditc_gr1a,Investment,B,compustat_annual,at;txditc,chg_to_assets
-txditc_gr3a,Investment,B,compustat_annual,at;txditc,chg_to_assets
-cl_gr1,Issuance,B,compustat_annual,lct,var_growth
-cl_gr3,Issuance,B,compustat_annual,lct,var_growth
-debt_gr1,Issuance,B,compustat_annual,dlc;dltt,var_growth
-debt_gr3,Issuance,B,compustat_annual,dlc;dltt,var_growth
-debtlt_gr1a,Issuance,B,compustat_annual,at;dltt,chg_to_assets
-debtlt_gr3a,Issuance,B,compustat_annual,at;dltt,chg_to_assets
-debtst_gr1a,Issuance,B,compustat_annual,at;dlc,chg_to_assets
-debtst_gr3a,Issuance,B,compustat_annual,at;dlc,chg_to_assets
-fnl_gr1a,Issuance,B,compustat_annual,at;dlc;dltt;pstk_x,chg_to_assets
-fnl_gr3a,Issuance,B,compustat_annual,at;dlc;dltt;pstk_x,chg_to_assets
-lt_gr1,Issuance,B,compustat_annual,lt,var_growth
-lt_gr3,Issuance,B,compustat_annual,lt,var_growth
-ncl_gr1,Issuance,B,compustat_annual,lct;lt,var_growth
-ncl_gr3,Issuance,B,compustat_annual,lct;lt,var_growth
-ni_ivol,Low risk,B,compustat_annual,at;ib,earnings persistence
-roe_be_std,Low risk,B,compustat_annual,be_x;ib,vola
-at_turnover,Operating efficiency,B,compustat_annual,at;sale,safe_div / temp_rat_other
-capx_at,Operating efficiency,B,compustat_annual,at;capx,safe_div / temp_rat_other
-opex_at,Operating efficiency,B,compustat_annual,at;cogs;xsga,safe_div / temp_rat_other
-sale_be,Operating efficiency,B,compustat_annual,be_x;sale,safe_div / temp_rat_other
-ebitda_at,Profitability,B,compustat_annual,at;oibdp,safe_div / temp_rat_other
-ebitda_debt,Profitability,B,compustat_annual,dlc;dltt;oibdp,safe_div / temp_rat_other
-ebitda_sale,Profitability,B,compustat_annual,oibdp;sale,safe_div / temp_rat_other
-fi_at,Profitability,B,compustat_annual,at;ni;xint,safe_div / temp_rat_other
-gp_at,Profitability,B,compustat_annual,at;cogs;sale,safe_div / temp_rat_other
-gp_atl1,Profitability,B,compustat_annual,at;cogs;sale,safe_div / temp_rat_other
-gp_sale,Profitability,B,compustat_annual,cogs;sale,safe_div / temp_rat_other
-ni_at,Profitability,B,compustat_annual,at;ib,safe_div / temp_rat_other
-ni_be,Profitability,B,compustat_annual,be_x;ib,safe_div / temp_rat_other
-ni_sale,Profitability,B,compustat_annual,ib;sale,safe_div / temp_rat_other
-nix_be,Profitability,B,compustat_annual,be_x;ni,safe_div / temp_rat_other
-nix_sale,Profitability,B,compustat_annual,ni;sale,safe_div / temp_rat_other
-ope_be,Profitability,B,compustat_annual,be_x;oibdp;xint,safe_div / temp_rat_other
-ope_bel1,Profitability,B,compustat_annual,be_x;oibdp;xint,safe_div / temp_rat_other
-profit_cl,Profitability,B,compustat_annual,lct;oibdp,safe_div / temp_rat_other
-assets,Size,B,compustat_annual,at,create_acc_chars
-book_equity,Size,B,compustat_annual,be_x,create_acc_chars
-enterprise_value,Size,B,compustat_annual,che;dlc;dltt;me_company,add_me_data_and_compute_me_mev_mat_eqdur_vars
-net_income,Size,B,compustat_annual,ib,create_acc_chars
-sales,Size,B,compustat_annual,sale,create_acc_chars
-at_me,Value,B,compustat_annual,at;me_company,scale_me
-at_mev,Value,B,compustat_annual,at;che;dlc;dltt;me_company,scale_mev
-be_me,Value,B,compustat_annual,be_x;me_company,scale_me
-be_mev,Value,B,compustat_annual,be_x;che;dlc;dltt;me_company,scale_mev
-ebitda_me,Value,B,compustat_annual,me_company;oibdp,scale_me
-ebitda_mev,Value,B,compustat_annual,che;dlc;dltt;me_company;oibdp,scale_mev
-gp_me,Value,B,compustat_annual,cogs;me_company;sale,scale_me
-gp_mev,Value,B,compustat_annual,che;cogs;dlc;dltt;me_company;sale,scale_mev
-ni_me,Value,B,compustat_annual,ib;me_company,scale_me
-nix_me,Value,B,compustat_annual,me_company;ni,scale_me
-ope_me,Value,B,compustat_annual,me_company;oibdp;xint,scale_me
-sale_me,Value,B,compustat_annual,me_company;sale,scale_me
-sale_mev,Value,B,compustat_annual,che;dlc;dltt;me_company;sale,scale_mev
+characteristic,theme,version,branch,table,inputs,jkp_function
+chcsho_12m,Issuance,A,market,crsp_panel_acc+crsp_daily_agg,shrout;cfacshr_mth,chcsho_cols
+chcsho_1m,Issuance,A,market,crsp_panel_acc+crsp_daily_agg,shrout;cfacshr_mth,chcsho_cols
+chcsho_3m,Issuance,A,market,crsp_panel_acc+crsp_daily_agg,shrout;cfacshr_mth,chcsho_cols
+chcsho_6m,Issuance,A,market,crsp_panel_acc+crsp_daily_agg,shrout;cfacshr_mth,chcsho_cols
+eqnpo_12m,Issuance,A,market,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
+eqnpo_1m,Issuance,A,market,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
+eqnpo_3m,Issuance,A,market,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
+eqnpo_6m,Issuance,A,market,crsp_panel_acc,ret;ret_signal_ok;me,eqnpo_cols
+ret_24_12,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_36_1,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_36_12,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_48_1,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_48_12,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_60_1,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_60_12,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_60_36,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+seas_11_15na,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_16_20na,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_2_5na,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_6_10na,Long-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+beta_252d,Low risk,A,market,crsp_daily_agg,beta_252d,roll_apply_daily / bidask_hl (step 9)
+beta_60m,Low risk,A,market,crsp_panel_acc+ff_factors_monthly,ret;ret_exc;ret_signal_ok;mkt_excess,prep_data_factor_regs / capm / market_beta
+ivol_capm_60m,Low risk,A,market,crsp_panel_acc+ff_factors_monthly,ret;ret_exc;ret_signal_ok;mkt_excess,prep_data_factor_regs / capm / market_beta
+rmax1_21d,Low risk,A,market,crsp_daily_agg,rmax1_21d,roll_apply_daily / bidask_hl (step 9)
+rmax5_21d,Low risk,A,market,crsp_daily_agg,rmax5_21d,roll_apply_daily / bidask_hl (step 9)
+rmax5_rvol_21d,Low risk,A,market,crsp_daily_agg,rmax5_21d;rvol_252d,finish_daily_chars
+rvol_21d,Low risk,A,market,crsp_daily_agg,rvol_21d,roll_apply_daily / bidask_hl (step 9)
+rvol_252d,Low risk,A,market,crsp_daily_agg,rvol_252d,roll_apply_daily / bidask_hl (step 9)
+rvolhl_21d,Low risk,A,market,crsp_daily_agg,rvolhl_21d,roll_apply_daily / bidask_hl (step 9)
+prc_highprc_252d,Momentum,A,market,crsp_daily_agg,prc_highprc_252d,roll_apply_daily / bidask_hl (step 9)
+ret_12_0,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_12_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_12_7,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_18_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_24_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_2_0,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_3_0,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_3_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_6_0,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_6_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_9_0,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ret_9_1,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+seas_1_1na,Momentum,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_11_15an,Seasonality,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_16_20an,Seasonality,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_1_1an,Seasonality,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_2_5an,Seasonality,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+seas_6_10an,Seasonality,A,market,crsp_panel_acc,ret;ret_signal_ok,seasonality
+ret_1_0,Short-term reversal,A,market,crsp_panel_acc,ret;ret_signal_ok,mom_rev_cols
+ami_126d,Size,A,market,crsp_daily_agg,ami_126d,roll_apply_daily / bidask_hl (step 9)
+bidaskhl_21d,Size,A,market,crsp_daily_agg,bidaskhl_21d,roll_apply_daily / bidask_hl (step 9)
+dolvol_126d,Size,A,market,crsp_daily_agg,dolvol_126d,roll_apply_daily / bidask_hl (step 9)
+dolvol_var_126d,Size,A,market,crsp_daily_agg,dolvol_var_126d,roll_apply_daily / bidask_hl (step 9)
+market_equity,Size,A,market,crsp_panel_acc,me,market_chars_monthly
+prc,Size,A,market,crsp_panel_acc,prc,gen_crsp_sf
+div12m_me,Value,A,market,crsp_panel_acc+crsp_daily_agg,ret;retx;ret_signal_ok;prc;shrout;me;cfacshr_mth,prepare_crsp_sf (div_tot) / div_cols
+div1m_me,Value,A,market,crsp_panel_acc+crsp_daily_agg,ret;retx;ret_signal_ok;prc;shrout;me;cfacshr_mth,prepare_crsp_sf (div_tot) / div_cols
+div3m_me,Value,A,market,crsp_panel_acc+crsp_daily_agg,ret;retx;ret_signal_ok;prc;shrout;me;cfacshr_mth,prepare_crsp_sf (div_tot) / div_cols
+div6m_me,Value,A,market,crsp_panel_acc+crsp_daily_agg,ret;retx;ret_signal_ok;prc;shrout;me;cfacshr_mth,prepare_crsp_sf (div_tot) / div_cols
+ni_ar1,Earnings quality,B,first_choice,compustat_annual,at;ib,earnings persistence
+at_be,Financial strength,B,first_choice,compustat_annual,at;be_x,safe_div / temp_rat_other
+ca_cl,Financial strength,B,first_choice,compustat_annual,act;lct,safe_div / temp_rat_other
+cash_at,Financial strength,B,first_choice,compustat_annual,at;che,safe_div / temp_rat_other
+cash_cl,Financial strength,B,first_choice,compustat_annual,che;lct,safe_div / temp_rat_other
+cash_gr1a,Financial strength,B,first_choice,compustat_annual,at;che,chg_to_assets
+cash_gr3a,Financial strength,B,first_choice,compustat_annual,at;che,chg_to_assets
+cash_lt,Financial strength,B,leaves_present,compustat_annual,che;lt,safe_div / temp_rat_other
+cash_me,Financial strength,B,leaves_present,compustat_annual,che;me_company,scale_me
+cash_mev,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,scale_mev
+cl_lt,Financial strength,B,first_choice,compustat_annual,lct;lt,safe_div / temp_rat_other
+debt_at,Financial strength,B,first_choice,compustat_annual,at;dlc;dltt,safe_div / temp_rat_other
+debt_be,Financial strength,B,first_choice,compustat_annual,be_x;dlc;dltt,safe_div / temp_rat_other
+debt_me,Financial strength,B,leaves_present,compustat_annual,dlc;dltt;me_company,scale_me
+debt_mev,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,scale_mev
+debtlt_be,Financial strength,B,first_choice,compustat_annual,be_x;dltt,safe_div / temp_rat_other
+debtlt_debt,Financial strength,B,leaves_present,compustat_annual,dlc;dltt,safe_div / temp_rat_other
+debtlt_mev,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,scale_mev
+debtst_debt,Financial strength,B,leaves_present,compustat_annual,dlc;dltt,safe_div / temp_rat_other
+debtst_mev,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,scale_mev
+int_debt,Financial strength,B,leaves_present,compustat_annual,dlc;dltt;xint,safe_div / temp_rat_other
+int_debtlt,Financial strength,B,leaves_present,compustat_annual,dltt;xint,safe_div / temp_rat_other
+netdebt_me,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,scale_me
+nwc_at,Financial strength,B,first_choice,compustat_annual,act;at;lct,safe_div / temp_rat_other
+pstk_gr1,Financial strength,B,leaves_present,compustat_annual,pstk_x,var_growth
+pstk_gr3,Financial strength,B,leaves_present,compustat_annual,pstk_x,var_growth
+pstk_mev,Financial strength,B,leaves_present,compustat_annual,che;dlc;dltt;me_company;pstk_x,scale_mev
+sale_nwc,Financial strength,B,first_choice,compustat_annual,act;lct;sale,safe_div / temp_rat_other
+dgp_dsale,Fundamental momentum,B,definitional_fallback,compustat_annual,cogs;sale,chg_to_exp
+dsale_dsga,Fundamental momentum,B,first_choice,compustat_annual,sale;xsga,chg_to_exp
+ebitda_gr1a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;oibdp;sale;xsga,chg_to_assets
+ebitda_gr3a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;oibdp;sale;xsga,chg_to_assets
+gmar_ch5,Fundamental momentum,B,definitional_fallback,compustat_annual,cogs;sale,chg_var1_to_var2
+gp_gr1a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;sale,chg_to_assets
+gp_gr3a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;sale,chg_to_assets
+gpoa_ch5,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;sale,chg_var1_to_var2
+ni_gr1a,Fundamental momentum,B,first_choice,compustat_annual,at;ib,chg_to_assets
+ni_gr3a,Fundamental momentum,B,first_choice,compustat_annual,at;ib,chg_to_assets
+nix_gr1a,Fundamental momentum,B,first_choice,compustat_annual,at;ni,chg_to_assets
+nix_gr3a,Fundamental momentum,B,first_choice,compustat_annual,at;ni,chg_to_assets
+ope_gr1a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;oibdp;sale;xint;xsga,chg_to_assets
+ope_gr3a,Fundamental momentum,B,definitional_fallback,compustat_annual,at;cogs;oibdp;sale;xint;xsga,chg_to_assets
+roa_ch5,Fundamental momentum,B,first_choice,compustat_annual,at;ib,chg_var1_to_var2
+roe_ch5,Fundamental momentum,B,first_choice,compustat_annual,be_x;ib,chg_var1_to_var2
+at_gr1,Investment,B,first_choice,compustat_annual,at,var_growth
+at_gr3,Investment,B,first_choice,compustat_annual,at,var_growth
+be_gr1,Investment,B,first_choice,compustat_annual,be_x,var_growth
+be_gr1a,Investment,B,first_choice,compustat_annual,at;be_x,chg_to_assets
+be_gr3,Investment,B,first_choice,compustat_annual,be_x,var_growth
+ca_gr1,Investment,B,first_choice,compustat_annual,act,var_growth
+ca_gr3,Investment,B,first_choice,compustat_annual,act,var_growth
+capex_abn,Investment,B,first_choice,compustat_annual,capx;sale,compute_capex_abn
+capx_gr1,Investment,B,leaves_present,compustat_annual,capx,var_growth
+capx_gr1a,Investment,B,first_choice,compustat_annual,at;capx,chg_to_assets
+capx_gr2,Investment,B,leaves_present,compustat_annual,capx,var_growth
+capx_gr3,Investment,B,leaves_present,compustat_annual,capx,var_growth
+capx_gr3a,Investment,B,first_choice,compustat_annual,at;capx,chg_to_assets
+coa_gr1a,Investment,B,first_choice,compustat_annual,act;at;che,chg_to_assets
+coa_gr3a,Investment,B,first_choice,compustat_annual,act;at;che,chg_to_assets
+cogs_gr1,Investment,B,leaves_present,compustat_annual,cogs,var_growth
+cogs_gr3,Investment,B,leaves_present,compustat_annual,cogs,var_growth
+col_gr1a,Investment,B,first_choice,compustat_annual,at;dlc;lct,chg_to_assets
+col_gr3a,Investment,B,first_choice,compustat_annual,at;dlc;lct,chg_to_assets
+cowc_gr1a,Investment,B,first_choice,compustat_annual,act;at;che;dlc;lct,chg_to_assets
+cowc_gr3a,Investment,B,first_choice,compustat_annual,act;at;che;dlc;lct,chg_to_assets
+nca_gr1,Investment,B,first_choice,compustat_annual,act;at,var_growth
+nca_gr3,Investment,B,first_choice,compustat_annual,act;at,var_growth
+ncol_gr1a,Investment,B,first_choice,compustat_annual,at;dltt;lct;lt,chg_to_assets
+ncol_gr3a,Investment,B,first_choice,compustat_annual,at;dltt;lct;lt,chg_to_assets
+nwc_gr1a,Investment,B,first_choice,compustat_annual,act;at;lct,chg_to_assets
+nwc_gr3a,Investment,B,first_choice,compustat_annual,act;at;lct,chg_to_assets
+ol_gr1a,Investment,B,first_choice,compustat_annual,at;dlc;dltt;lct;lt,chg_to_assets
+ol_gr3a,Investment,B,first_choice,compustat_annual,at;dlc;dltt;lct;lt,chg_to_assets
+opex_gr1,Investment,B,definitional_fallback,compustat_annual,cogs;xsga,var_growth
+opex_gr3,Investment,B,definitional_fallback,compustat_annual,cogs;xsga,var_growth
+sale_gr1,Investment,B,first_choice,compustat_annual,sale,var_growth
+sale_gr3,Investment,B,first_choice,compustat_annual,sale,var_growth
+sga_gr1,Investment,B,leaves_present,compustat_annual,xsga,var_growth
+sga_gr3,Investment,B,leaves_present,compustat_annual,xsga,var_growth
+txditc_gr1a,Investment,B,first_choice,compustat_annual,at;txditc,chg_to_assets
+txditc_gr3a,Investment,B,first_choice,compustat_annual,at;txditc,chg_to_assets
+cl_gr1,Issuance,B,first_choice,compustat_annual,lct,var_growth
+cl_gr3,Issuance,B,first_choice,compustat_annual,lct,var_growth
+debt_gr1,Issuance,B,leaves_present,compustat_annual,dlc;dltt,var_growth
+debt_gr3,Issuance,B,leaves_present,compustat_annual,dlc;dltt,var_growth
+debtlt_gr1a,Issuance,B,first_choice,compustat_annual,at;dltt,chg_to_assets
+debtlt_gr3a,Issuance,B,first_choice,compustat_annual,at;dltt,chg_to_assets
+debtst_gr1a,Issuance,B,first_choice,compustat_annual,at;dlc,chg_to_assets
+debtst_gr3a,Issuance,B,first_choice,compustat_annual,at;dlc,chg_to_assets
+fnl_gr1a,Issuance,B,first_choice,compustat_annual,at;dlc;dltt;pstk_x,chg_to_assets
+fnl_gr3a,Issuance,B,first_choice,compustat_annual,at;dlc;dltt;pstk_x,chg_to_assets
+lt_gr1,Issuance,B,leaves_present,compustat_annual,lt,var_growth
+lt_gr3,Issuance,B,leaves_present,compustat_annual,lt,var_growth
+ncl_gr1,Issuance,B,first_choice,compustat_annual,lct;lt,var_growth
+ncl_gr3,Issuance,B,first_choice,compustat_annual,lct;lt,var_growth
+ni_ivol,Low risk,B,first_choice,compustat_annual,at;ib,earnings persistence
+roe_be_std,Low risk,B,first_choice,compustat_annual,be_x;ib,vola
+at_turnover,Operating efficiency,B,first_choice,compustat_annual,at;sale,safe_div / temp_rat_other
+capx_at,Operating efficiency,B,first_choice,compustat_annual,at;capx,safe_div / temp_rat_other
+opex_at,Operating efficiency,B,definitional_fallback,compustat_annual,at;cogs;xsga,safe_div / temp_rat_other
+sale_be,Operating efficiency,B,first_choice,compustat_annual,be_x;sale,safe_div / temp_rat_other
+ebitda_at,Profitability,B,definitional_fallback,compustat_annual,at;cogs;oibdp;sale;xsga,safe_div / temp_rat_other
+ebitda_debt,Profitability,B,definitional_fallback,compustat_annual,cogs;dlc;dltt;oibdp;sale;xsga,safe_div / temp_rat_other
+ebitda_sale,Profitability,B,definitional_fallback,compustat_annual,cogs;oibdp;sale;xsga,safe_div / temp_rat_other
+fi_at,Profitability,B,first_choice,compustat_annual,at;ni;xint,safe_div / temp_rat_other
+gp_at,Profitability,B,definitional_fallback,compustat_annual,at;cogs;sale,safe_div / temp_rat_other
+gp_atl1,Profitability,B,definitional_fallback,compustat_annual,at;cogs;sale,safe_div / temp_rat_other
+gp_sale,Profitability,B,definitional_fallback,compustat_annual,cogs;sale,safe_div / temp_rat_other
+ni_at,Profitability,B,first_choice,compustat_annual,at;ib,safe_div / temp_rat_other
+ni_be,Profitability,B,first_choice,compustat_annual,be_x;ib,safe_div / temp_rat_other
+ni_sale,Profitability,B,first_choice,compustat_annual,ib;sale,safe_div / temp_rat_other
+nix_be,Profitability,B,first_choice,compustat_annual,be_x;ni,safe_div / temp_rat_other
+nix_sale,Profitability,B,first_choice,compustat_annual,ni;sale,safe_div / temp_rat_other
+ope_be,Profitability,B,definitional_fallback,compustat_annual,be_x;cogs;oibdp;sale;xint;xsga,safe_div / temp_rat_other
+ope_bel1,Profitability,B,definitional_fallback,compustat_annual,be_x;cogs;oibdp;sale;xint;xsga,safe_div / temp_rat_other
+profit_cl,Profitability,B,definitional_fallback,compustat_annual,cogs;lct;oibdp;sale;xsga,safe_div / temp_rat_other
+assets,Size,B,first_choice,compustat_annual,at,create_acc_chars
+book_equity,Size,B,first_choice,compustat_annual,be_x,create_acc_chars
+enterprise_value,Size,B,leaves_present,compustat_annual,che;dlc;dltt;me_company,add_me_data_and_compute_me_mev_mat_eqdur_vars
+net_income,Size,B,first_choice,compustat_annual,ib,create_acc_chars
+sales,Size,B,first_choice,compustat_annual,sale,create_acc_chars
+at_me,Value,B,first_choice,compustat_annual,at;me_company,scale_me
+at_mev,Value,B,first_choice,compustat_annual,at;che;dlc;dltt;me_company,scale_mev
+be_me,Value,B,first_choice,compustat_annual,be_x;me_company,scale_me
+be_mev,Value,B,first_choice,compustat_annual,be_x;che;dlc;dltt;me_company,scale_mev
+ebitda_me,Value,B,definitional_fallback,compustat_annual,cogs;me_company;oibdp;sale;xsga,scale_me
+ebitda_mev,Value,B,definitional_fallback,compustat_annual,che;cogs;dlc;dltt;me_company;oibdp;sale;xsga,scale_mev
+eq_dur,Value,B,first_choice,compustat_annual,be_x;ib;me_company;sale,equity_duration_cd
+gp_me,Value,B,definitional_fallback,compustat_annual,cogs;me_company;sale,scale_me
+gp_mev,Value,B,definitional_fallback,compustat_annual,che;cogs;dlc;dltt;me_company;sale,scale_mev
+ni_me,Value,B,first_choice,compustat_annual,ib;me_company,scale_me
+nix_me,Value,B,first_choice,compustat_annual,me_company;ni,scale_me
+ope_me,Value,B,definitional_fallback,compustat_annual,cogs;me_company;oibdp;sale;xint;xsga,scale_me
+sale_me,Value,B,first_choice,compustat_annual,me_company;sale,scale_me
+sale_mev,Value,B,first_choice,compustat_annual,che;dlc;dltt;me_company;sale,scale_mev
