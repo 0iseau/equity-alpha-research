@@ -13,6 +13,25 @@ Reference code (Resources/reference_code/):
     capm              -> beta = cov(ret_exc, mktrf) / var(mktrf), same guards
     dolvol            -> mean of the daily dollar volume
     adj_trd_vol_NASDAQ-> Gao-Ritter NASDAQ volume adjustment (copied in step 3)
+    rmax              -> highest daily return of the month and mean of the five
+                         highest, same guards as rvol
+    compute_bidask_spread -> rvolhl_21d, the high-low volatility that comes out
+                         of the same Corwin-Schultz computation as bidaskhl_21d
+    ami               -> Amihud illiquidity: mean of |ret| / dollar volume x 1e6
+    dolvol            -> dolvol_var: std / mean of the daily dollar volume
+    prc_to_high       -> last split-adjusted price over the highest one, 12 months
+    gen_crsp_sf       -> the monthly file carries the cumulative share factor; our
+                         monthly export does not, so cfacshr_mth is taken from the
+                         daily file on the date of the monthly row
+
+Share factor (audit of 2026-11-12). The CRSP cumulative factor of the export is
+today's vintage, written with 12 decimals: after many later reverse splits its
+level is rounded, down to zero (PERMNO 12350), and a ratio of two levels is
+lost. Every use of the factor here is a ratio, so the script builds a LOCAL
+factor that only knows the past: 1 on the first daily row of the stock, then,
+day after day, the ratio of the CRSP levels when both are at least 1e-6
+(precise to 2e-6), and otherwise the dated split events of the distribution
+file (type FRS: stock splits and stock dividends). See local_share_factor.
 
 Deviations (see CleaningSpec.md):
 - Market and risk-free returns come from the Ken French daily file (JKP builds
@@ -27,7 +46,9 @@ Deviations (see CleaningSpec.md):
 Outputs (data/processed/):
 - crsp_daily_min.parquet     the daily columns we use (intermediate, typed)
 - crsp_daily_agg.parquet     one row per stock-month: rvol_21d, rvol_252d, beta_252d,
-                             dolvol_21d, dolvol_126d, spread_quoted_21d, bidaskhl_21d and counts
+                             dolvol_21d, dolvol_126d, spread_quoted_21d, bidaskhl_21d,
+                             rmax1_21d, rmax5_21d, rvolhl_21d, ami_126d,
+                             dolvol_var_126d, prc_highprc_252d, cfacshr_mth and counts
 - crsp_daily_agg_report.json checks, counts and output hashes (written last)
 """
 
@@ -35,6 +56,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import uuid
 import zipfile
 
@@ -52,6 +74,7 @@ FF_DAILY = RAW / "french" / "F-F_Research_Data_Factors_daily_CSV.zip"
 PANEL = PROCESSED / "crsp_panel_acc.parquet"
 PANEL_REPORT = PROCESSED / "accounting_availability_report.json"
 STEP1_REPORT = PROCESSED / "crsp_monthly_report.json"
+DISTRIBUTIONS = PROCESSED / "crsp_distributions.parquet"
 
 HEADER = ["PERMNO", "HdrCUSIP", "SecurityNm", "Ticker", "PERMCO", "YYYYMMDD", "DlyCalDt",
           "DlyDelFlg", "DlyPrc", "DlyPrcFlg", "DlyCap", "DlyRet", "DlyRetx", "DlyRetI", "DlyVol",
@@ -67,7 +90,15 @@ N_BATCHES = 60
 CONVERT_VERSION = 2            # change it when convert_daily changes
 SAMPLE_START = 196301
 SUMS = ["n", "n_zero", "s_r", "s_rr", "s_m", "s_mm", "s_rm", "s_raw", "s_raw2",
-        "n_dv", "s_dv", "n_sp", "s_sp"]
+        "n_dv", "s_dv", "n_sp", "s_sp", "n_dvok", "n_ami", "s_ami", "n_pa"]
+FACTOR_MIN_LEVEL = 1e-6        # below it, the 12 decimals of the export make a ratio of levels imprecise
+# Changes of the CRSP factor between two precise levels that the dated events do
+# not give within 1e-4: two without any event (PERMNO 30920 on 1963-11-12, 55555
+# on 1991-06-17) and three extreme reverse splits whose event has only 6 decimals
+# (for example 13013 on 2017-09-22). The CRSP level is followed for them. A
+# larger count means the event rule no longer describes the file.
+MAX_UNMATCHED_FACTOR_CHANGES = 5
+AMI_SCALE = 1e6                # JKP ami: |ret| / dollar volume, times one million
 
 
 def convert_daily(report: dict) -> None:
@@ -175,6 +206,95 @@ def add_daily_exchange(d: pl.DataFrame, sec: pl.DataFrame) -> pl.DataFrame:
         cols + ["is_nasdaq"]).sort("permno", "date")
 
 
+def read_share_events(report: dict) -> pl.DataFrame:
+    """
+    Description:
+        Dated share events of step 1: splits and stock dividends (CRSP type FRS).
+        The other event types that carry a share factor (mergers, spin-offs,
+        offers) do not move the CRSP cumulative factor. Several FRS events with
+        the same ex-date ADD UP in CRSP: the share count is multiplied by
+        1 + sum(DisFacShr), not by the product of the (1 + DisFacShr) (8 days in
+        the file, for example PERMNO 22605 on 1975-06-02). The run counts how many
+        changes of the CRSP factor between two precise levels these events
+        explain (entry daily_counts of the report) and stops if more than
+        MAX_UNMATCHED_FACTOR_CHANGES are not explained.
+    Output:
+        permno, exdt, mult = 1 + sum of DisFacShr of the ex-date.
+    """
+    dist, run_id = read_verified(DISTRIBUTIONS, STEP1_REPORT)
+    report["inputs"][DISTRIBUTIONS.name] = {"from_run": run_id}
+    ev = dist.filter((pl.col("distype") == "FRS") & pl.col("disfacshr").is_not_null()
+                     & (pl.col("disfacshr") != 0))
+    check(ev["disexdt"].null_count() == 0, "A share event without an ex-date")
+    check(ev.filter((pl.col("disfacshr") <= -1) | ~pl.col("disfacshr").is_finite()).height == 0,
+          "A share event that removes every share")
+    days = (ev.sort("permno", "disexdt", "disseqnbr")
+            .group_by("permno", "disexdt", maintain_order=True)
+            .agg(mult=1 + pl.col("disfacshr").sum(), n=pl.len()))
+    check(days.filter(pl.col("mult") <= 0).height == 0, "Share events of one day remove every share")
+    report["share_events"] = {"events": ev.height, "stocks": ev["permno"].n_unique(),
+                              "ex_dates": days.height, "ex_dates_with_several_events": days.filter(pl.col("n") > 1).height}
+    return days.select("permno", pl.col("disexdt").alias("exdt"), "mult").sort("permno", "exdt")
+
+
+def local_share_factor(d: pl.DataFrame, events: pl.DataFrame, counts: dict) -> pl.DataFrame:
+    """
+    Description:
+        Cumulative share factor that only uses the past (see the module docstring).
+    Steps:
+        1) Exact copies dropped; rows sorted by stock and date.
+        2) Each ex-date goes to the first daily row on or after it; the
+           multipliers of several ex-dates that land on one row are multiplied.
+        3) Step of the day = level / previous level when both CRSP levels are at
+           least FACTOR_MIN_LEVEL; otherwise 1 / product of the event multipliers
+           of the day (1 without an event). The first row of a stock has step 1.
+        4) cfacshr = cumulative product of the steps, missing where CRSP gives no
+           factor that day. The CRSP level is kept in cfacshr_raw.
+    Output:
+        The daily rows, with the local factor in cfacshr.
+    """
+    n0 = d.height
+    d = d.unique().sort("permno", "date")
+    counts["exact_duplicate_rows"] += n0 - d.height
+    check(d.select("permno", "date").is_unique().all(), "Conflicting duplicate (permno, date)")
+    ev = events.filter(pl.col("permno").is_in(d["permno"].unique().implode()))
+    rows = d.select("permno", pl.col("date").alias("row_date"))
+    hit = (ev.sort("exdt").join_asof(rows.sort("row_date"), left_on="exdt", right_on="row_date",
+                                     by="permno", strategy="forward", check_sortedness=False)
+           .filter(pl.col("row_date").is_not_null()).sort("permno", "exdt")
+           .group_by("permno", "row_date", maintain_order=True).agg(ev_mult=pl.col("mult").product()))
+    n = d.height
+    d = d.join(hit, left_on=["permno", "date"], right_on=["permno", "row_date"], how="left").sort("permno", "date")
+    check(d.height == n, "The share event join changed the row count")
+    f, prev = pl.col("cfacshr"), pl.col("cfacshr").shift(1).over("permno")
+    d = d.with_columns(
+        first=pl.int_range(pl.len()).over("permno") == 0,
+        precise=((f >= FACTOR_MIN_LEVEL) & (prev >= FACTOR_MIN_LEVEL)).fill_null(False),
+        prev_raw=prev,
+    ).with_columns(
+        step=pl.when(pl.col("first")).then(1.0).when(pl.col("precise")).then(f / pl.col("prev_raw"))
+        .otherwise(1.0 / pl.col("ev_mult").fill_null(1.0)),
+    )
+    later = ~pl.col("first")
+    counts["factor_rows_below_min_level"] += d.filter(f < FACTOR_MIN_LEVEL).height
+    counts["factor_rows_exactly_zero"] += d.filter(f == 0).height
+    counts["factor_steps_from_events"] += d.filter(later & ~pl.col("precise") & pl.col("ev_mult").is_not_null()).height
+    counts["factor_stocks_using_events"] += d.filter(
+        later & ~pl.col("precise") & pl.col("ev_mult").is_not_null())["permno"].n_unique()
+    counts["factor_changes_between_precise_levels"] += d.filter(later & pl.col("precise") & (pl.col("step") != 1)).height
+    # Diagnostic: precise level changes that the FRS events of the day do not give.
+    unmatched = d.filter(
+        later & pl.col("precise") & (pl.col("step") != 1)
+        & (pl.col("ev_mult").is_null() | ((pl.col("step") * pl.col("ev_mult") - 1).abs() > 1e-4)))
+    counts["precise_changes_not_matched_by_events"] += unmatched.height
+    if "_unmatched" in counts:      # only the main run keeps the list
+        counts["_unmatched"] += unmatched.select("permno", "date", "prev_raw", "cfacshr", "ev_mult").to_dicts()
+    d = d.with_columns(g=pl.col("step").cum_prod().over("permno"))
+    check(d.filter((pl.col("g") <= 0) | ~pl.col("g").is_finite()).height == 0, "Local share factor not positive")
+    return d.with_columns(cfacshr_raw=f, cfacshr=pl.when(f.is_not_null()).then(pl.col("g"))).drop(
+        "ev_mult", "first", "precise", "prev_raw", "step", "g")
+
+
 def read_french_daily(report: dict) -> pl.DataFrame:
     # Ken French daily factors: date, market excess return and risk-free rate (decimals).
     data, digest = read_raw_verified(FF_DAILY, FF_DAILY.parent / "manifest.json")
@@ -274,6 +394,8 @@ def prepare_batch(d: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, counts: 
         .then((pl.col("ask") - pl.col("bid")) / ((pl.col("ask") + pl.col("bid")) / 2)),
     ).with_columns(
         spread_d=pl.when(pl.col("spread_d") <= MAX_SPREAD).then(pl.col("spread_d")),
+        # JKP prepare_daily: prc_adj = prc / adjfct (safe_div mode 1: factor != 0).
+        prc_adj_d=pl.when(pl.col("cfacshr") != 0).then(pl.col("prc") / pl.col("cfacshr")),
     ).pipe(add_high_low_spread)
 
 
@@ -294,6 +416,7 @@ def add_high_low_spread(d: pl.DataFrame) -> pl.DataFrame:
     """
     col = pl.col
     sqrt2, const = 2 ** 0.5, 3 - 2 * 2 ** 0.5
+    k2 = (8 / math.pi) ** 0.5
     df = d.with_columns(
         # JKP safe_div: no value when the adjustment factor is missing or zero.
         prc_high=pl.when((col("prc") > 0) & (col("high") > 0) & (col("cfacshr") > 0))
@@ -394,10 +517,18 @@ def add_high_low_spread(d: pl.DataFrame) -> pl.DataFrame:
             .then((col("prc_high_2d") / col("prc_low_2d")).log() ** 2),
         )
         .with_columns(alpha=((sqrt2 - 1) * col("beta").sqrt()) / const - (col("gamma") / const).sqrt())
-        .with_columns(spread=2 * (col("alpha").exp() - 1) / (1 + col("alpha").exp()))
-        .with_columns(spread_hl_d=pl.when(col("spread") < 0).then(pl.lit(0.0)).otherwise(col("spread")))
+        .with_columns(
+            spread=2 * (col("alpha").exp() - 1) / (1 + col("alpha").exp()),
+            # JKP: sigma of the same estimator (rvolhl_21d is its monthly mean).
+            sigma=(((col("beta") / 2).sqrt() - col("beta").sqrt()) / (k2 * const))
+            + (col("gamma") / (k2 * k2 * const)).sqrt(),
+        )
+        .with_columns(
+            spread_hl_d=pl.when(col("spread") < 0).then(pl.lit(0.0)).otherwise(col("spread")),
+            sigma_hl_d=pl.when(col("sigma") < 0).then(pl.lit(0.0)).otherwise(col("sigma")),
+        )
     )
-    keep = [c for c in d.columns] + ["spread_hl_d", "hl_observed"]
+    keep = [c for c in d.columns] + ["spread_hl_d", "sigma_hl_d", "hl_observed"]
     return df.rename({"prc": "prc_adj", "prc_unadj": "prc", "tvol": "vol", "id": "permno"}).select(keep)
 
 
@@ -406,6 +537,11 @@ def month_sums(d: pl.DataFrame) -> pl.DataFrame:
     ok = pl.col("ret_exc").is_not_null()
     r, m = pl.col("ret_exc").filter(ok), pl.col("mktrf").filter(ok)
     raw = pl.col("ret").filter(ok)
+    dv = pl.col("dolvol_d")
+    # JKP ami: a zero dollar volume gives no ratio; rows of the return statistics only.
+    ami_d = (pl.col("ret").abs() / pl.when(dv != 0).then(dv)).filter(ok)
+    # JKP prc_to_high: adjusted prices on the rows of the return statistics.
+    pa = pl.col("prc_adj_d").filter(ok)
     # JKP practice (capm): fix the row order before sums of floats, which depend on
     # the order of their terms, so that two runs give the same bytes.
     return d.sort("permno", "date").group_by("permno", "ym", maintain_order=True).agg(
@@ -416,6 +552,19 @@ def month_sums(d: pl.DataFrame) -> pl.DataFrame:
         n_sp=pl.col("spread_d").count().cast(pl.Int64), s_sp=pl.col("spread_d").sum(),
         n_hl=pl.col("spread_hl_d").count().cast(pl.Int64), s_hl=pl.col("spread_hl_d").sum(),
         n_hl_obs=pl.col("hl_observed").sum().cast(pl.Int64),
+        n_sig=pl.col("sigma_hl_d").count().cast(pl.Int64), s_sig=pl.col("sigma_hl_d").sum(),
+        # JKP rmax: highest return and mean of the five highest of the month.
+        rmax1=raw.max(), rmax5=raw.top_k(5).mean(),
+        # JKP ami and dolvol (variability): sums for the 6-month windows.
+        n_ami=ami_d.count().cast(pl.Int64), s_ami=ami_d.sum(),
+        n_dvok=dv.filter(ok).count().cast(pl.Int64),
+        # Mean and centred sum of squares of the month: the 6-month variance is
+        # rebuilt from them without subtracting two large sums of squares.
+        mean_dv=dv.mean(), m2_dv=((dv - dv.mean()) ** 2).sum(),
+        min_dv=dv.min(), max_dv=dv.max(),
+        # JKP prc_to_high: count, extremes and last adjusted price (rows are sorted
+        # by date, so last() is the last day of the month with a return).
+        n_pa=pa.count().cast(pl.Int64), max_pa=pa.max(), min_pa=pa.min(), last_pa=pa.last(),
         s_vol=pl.col("vol").sum(), s_vol_adj=pl.col("vol_adj").sum(),
         n_nasdaq_days=pl.col("is_nasdaq").sum().cast(pl.Int64),
         n_exch_days=pl.col("is_nasdaq").count().cast(pl.Int64),
@@ -445,7 +594,17 @@ def window_stats(s: pl.DataFrame) -> pl.DataFrame:
     out = s
     for k in (6, 12):
         roll = (s.rolling(index_column="mi", period=f"{k}i", group_by="permno")
-                .agg([pl.col(c).sum().alias(f"{c}_{k}") for c in SUMS]))
+                .agg([pl.col(c).sum().alias(f"{c}_{k}") for c in SUMS]
+                     + [(pl.col("m2_dv").sum()
+                         + (pl.col("n_dv") * (pl.col("mean_dv") - (pl.col("n_dv") * pl.col("mean_dv")).sum()
+                                              / pl.col("n_dv").sum()) ** 2).sum()).alias(f"m2_dv_{k}"),
+                        pl.col("min_dv").min().alias(f"min_dv_{k}"),
+                        pl.col("max_dv").max().alias(f"max_dv_{k}"),
+                        pl.col("min_pa").min().alias(f"min_pa_{k}"),
+                        pl.col("max_pa").max().alias(f"max_pa_{k}"),
+                        # Last adjusted price of the window: the one of the latest
+                        # month that has a return (months are sorted in the window).
+                        pl.col("last_pa").filter(pl.col("n") > 0).last().alias(f"last_pa_{k}")]))
         out = out.join(roll, on=["permno", "mi"], how="left")
 
     def var(n, s1, s2):  # sample variance from count, sum and sum of squares
@@ -459,6 +618,8 @@ def window_stats(s: pl.DataFrame) -> pl.DataFrame:
         return pl.when(ok).then(expr)
 
     cov12 = (pl.col("s_rm_12") - pl.col("s_r_12") * pl.col("s_m_12") / pl.col("n_12")) / (pl.col("n_12") - 1)
+    dv_mean6 = pl.col("s_dv_6") / pl.col("n_dv_6")
+    dv_std6 = (pl.col("m2_dv_6") / (pl.col("n_dv_6") - 1)).sqrt()
     return out.select(
         "permno", pl.col("ym").alias("yyyymm"), "last_date", "n_days", "n_ret_raw", "ret_cmp",
         "n_long_gap", "s_vol", "s_vol_adj", "n_nasdaq_days", "n_exch_days",
@@ -481,17 +642,49 @@ def window_stats(s: pl.DataFrame) -> pl.DataFrame:
         # JKP bidaskhl_21d: monthly mean, more than 10 days (strictly, as in JKP).
         pl.when(pl.col("n_hl") > MIN_SPREAD_DAYS).then(pl.col("s_hl") / pl.col("n_hl"))
         .alias("bidaskhl_21d"),
+        # JKP compute_bidask_spread: same day filter as bidaskhl_21d (count of the spread).
+        pl.when((pl.col("n_hl") > MIN_SPREAD_DAYS) & (pl.col("n_sig") > 0))
+        .then(pl.col("s_sig") / pl.col("n_sig")).alias("rvolhl_21d"),
+        # JKP rmax: at least 15 returns, guards of the return statistics.
+        guarded(pl.col("rmax1"), "", MIN_OBS["21d"]).alias("rmax1_21d"),
+        guarded(pl.col("rmax5"), "", MIN_OBS["21d"]).alias("rmax5_21d"),
+        # JKP ami: at least 60 returns and 60 dollar volumes on these rows; guards
+        # of the return statistics; null when no ratio exists.
+        pl.when((pl.col("n_dvok_6") >= MIN_OBS["126d"]) & (pl.col("n_ami_6") > 0))
+        .then(guarded(pl.col("s_ami_6") / pl.col("n_ami_6") * AMI_SCALE, "_6", MIN_OBS["126d"]))
+        .alias("ami_126d"),
+        # JKP dolvol: std / mean of the daily dollar volume; null when the volume is
+        # constant or its mean is zero.
+        pl.when((pl.col("n_dv_6") >= MIN_OBS["126d"]) & (pl.col("min_dv_6") != pl.col("max_dv_6"))
+                & (dv_mean6 != 0)).then(dv_std6 / dv_mean6).alias("dolvol_var_126d"),
+        # JKP prc_to_high: at least 120 returns and 120 adjusted prices; null when
+        # the adjusted price is constant.
+        pl.when((pl.col("n_12") >= MIN_OBS["252d"]) & (pl.col("n_pa_12") >= MIN_OBS["252d"])
+                & (pl.col("min_pa_12") != pl.col("max_pa_12")))
+        .then(pl.col("last_pa_12") / pl.col("max_pa_12")).alias("prc_highprc_252d"),
     )
 
 
-def check_direct(out: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, report: dict) -> None:
+def check_direct(out: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, events: pl.DataFrame,
+                 report: dict) -> None:
     # Second route on a sample of stocks: compute every statistic directly from the
     # daily rows of each window (no sums), and compare.
     # The sample comes from the daily input, not from the output under test.
     sample = (pl.scan_parquet(DAILY_MIN).select("permno").unique().collect()["permno"].sort()
               .gather_every(400).to_list())
-    d = prepare_batch(pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_in(sample)).collect(),
-                      ff, sec, {k: 0 for k in COUNTS})
+    tmp = {k: 0 for k in COUNTS}
+    raw = pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_in(sample)).collect()
+    d = prepare_batch(local_share_factor(raw, events, tmp), ff, sec, tmp)
+    # The vintage test also takes the stocks that have several events on one day.
+    multi = (events.join(pl.read_parquet(DISTRIBUTIONS, columns=["permno", "disexdt", "distype", "disfacshr"])
+                         .filter((pl.col("distype") == "FRS") & (pl.col("disfacshr") != 0))
+                         .group_by("permno", "disexdt").agg(n=pl.len()).filter(pl.col("n") > 1),
+                         left_on=["permno", "exdt"], right_on=["permno", "disexdt"])["permno"].unique().to_list())
+    # ... and, apart, the stocks whose CRSP factor has a change that the dated
+    # events do not give: there a later vintage can change the local factor.
+    known = sorted({r["permno"] for r in report["unexplained_factor_changes"]})
+    extra = pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_in(multi + known)).collect()
+    vintage_test(pl.concat([raw, extra]).unique(), events, ff, sec, known, report)
     d = d.with_columns(mi=(pl.col("ym") // 100 * 12 + pl.col("ym") % 100).cast(pl.Int64))
     months = d.select("permno", "mi").unique()
     # The stock-months of the sample must be exactly the published ones.
@@ -501,37 +694,275 @@ def check_direct(out: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame, report:
         + months.join(pub, on=["permno", "mi"], how="anti").height
     check(key_diff == 0, f"{key_diff} stock-months differ between the output and the direct check")
     worst = {}
-    for k, cols in [(1, ["rvol_21d", "dolvol_21d", "spread_quoted_21d", "bidaskhl_21d"]),
-                    (6, ["dolvol_126d"]), (12, ["rvol_252d", "beta_252d"])]:
+    names = {"rvol_21d": "rvol", "rvol_252d": "rvol", "beta_252d": "beta", "dolvol_21d": "dolvol",
+             "dolvol_126d": "dolvol", "spread_quoted_21d": "spread", "bidaskhl_21d": "hl",
+             "rvolhl_21d": "sig", "rmax1_21d": "rmax1", "rmax5_21d": "rmax5", "ami_126d": "ami",
+             "dolvol_var_126d": "dvvar", "prc_highprc_252d": "prchigh"}
+    for k, cols in [(1, ["rvol_21d", "dolvol_21d", "spread_quoted_21d", "bidaskhl_21d",
+                         "rvolhl_21d", "rmax1_21d", "rmax5_21d"]),
+                    (6, ["dolvol_126d", "ami_126d", "dolvol_var_126d"]),
+                    (12, ["rvol_252d", "beta_252d", "prc_highprc_252d"])]:
         # Every daily row goes to the k windows (end months) that contain it.
         w = (d.with_columns(end=pl.int_ranges(pl.col("mi"), pl.col("mi") + k)).explode("end")
-             .join(months.rename({"mi": "end"}), on=["permno", "end"], how="semi"))
+             .join(months.rename({"mi": "end"}), on=["permno", "end"], how="semi")
+             .sort("permno", "end", "date"))
         ok = pl.col("ret_exc").is_not_null()
         r, m, raw = pl.col("ret_exc").filter(ok), pl.col("mktrf").filter(ok), pl.col("ret").filter(ok)
         n = ok.sum()
         min_obs = MIN_OBS[{1: "21d", 6: "126d", 12: "252d"}[k]]
         good = (n >= min_obs) & (raw.std() > RET_MIN_STD) & ((raw == 0).mean() < CONSTANT_MAX_ZERO_FRAC)
-        direct = w.group_by("permno", "end").agg(
+        dv = pl.col("dolvol_d")
+        pa = pl.col("prc_adj_d").filter(ok)
+        direct = w.group_by("permno", "end", maintain_order=True).agg(
             rvol=pl.when(good).then(r.std()),
             beta=pl.when(good).then(pl.cov(r, m) / m.var()),
-            dolvol=pl.when(pl.col("dolvol_d").count() >= min_obs).then(pl.col("dolvol_d").mean()),
+            dolvol=pl.when(dv.count() >= min_obs).then(dv.mean()),
             spread=pl.when(pl.col("spread_d").count() >= MIN_SPREAD_DAYS).then(pl.col("spread_d").mean()),
             hl=pl.when(pl.col("spread_hl_d").count() > MIN_SPREAD_DAYS).then(pl.col("spread_hl_d").mean()),
+            sig=pl.when(pl.col("spread_hl_d").count() > MIN_SPREAD_DAYS).then(pl.col("sigma_hl_d").mean()),
+            rmax1=pl.when(good).then(raw.max()),
+            rmax5=pl.when(good).then(raw.sort(descending=True).head(5).mean()),
+            ami=pl.when(good & (dv.filter(ok).count() >= min_obs))
+            .then((pl.col("ret").abs() / pl.when(dv != 0).then(dv)).filter(ok).mean() * AMI_SCALE),
+            dvvar=pl.when((dv.count() >= min_obs) & (dv.min() != dv.max()) & (dv.mean() != 0))
+            .then(dv.std() / dv.mean()),
+            prchigh=pl.when((n >= min_obs) & (pa.count() >= min_obs) & (pa.min() != pa.max()))
+            .then(pa.last() / pa.max()),
         )
         cmp = (out.with_columns(end=(pl.col("yyyymm") // 100 * 12 + pl.col("yyyymm") % 100).cast(pl.Int64))
                .join(direct, on=["permno", "end"], how="inner"))
         for c in cols:
-            ref = pl.col({"rvol": "rvol", "beta": "beta", "dolv": "dolvol", "spre": "spread", "bida": "hl"}[c[:4]])
+            ref = pl.col(names[c])
             null_diff = cmp.filter(pl.col(c).is_null() != ref.is_null()).height
             # Relative gap, with a floor on the scale (a beta near zero has no relative gap).
             rel = cmp.select(((pl.col(c) - ref).abs() / ref.abs().clip(lower_bound=1e-3)).max()).item()
-            worst[c] = {"rows": cmp.height, "null_mismatch": null_diff, "max_rel_diff": rel}
+            worst[c] = {"rows": cmp.height, "values": cmp.filter(pl.col(c).is_not_null()).height,
+                        "null_mismatch": null_diff, "max_rel_diff": rel}
             check(null_diff == 0 and (rel is None or rel < 1e-6),
                   f"Direct computation differs for {c}: {worst[c]}")
     report["direct_check_sample"] = {"stocks": len(sample), **worst}
 
 
-COUNTS = ["rows", "exact_duplicate_rows", "delisting_rows_dropped", "returns_dropped_after_long_gap",
+def month_factor(d: pl.DataFrame, panel_keys: pl.DataFrame) -> pl.DataFrame:
+    """
+    Description:
+        Cumulative share factor on the date of the monthly CRSP row.
+    Steps:
+        1) Daily rows on a (permno, date) of the monthly panel; exact copies dropped.
+        2) One factor per (permno, date), or the script stops.
+    Output:
+        permno, yyyymm, cfacshr_mth (missing when the daily file has no row that day).
+    """
+    f = (d.select("permno", "date", "cfacshr")
+         .join(panel_keys, on=["permno", "date"], how="inner").unique().sort("permno", "date"))
+    check(f.select("permno", "date").is_unique().all(), "Two share factors on the same day")
+    check(f.select("permno", "yyyymm").is_unique().all(), "Two monthly rows for one stock-month")
+    return f.select("permno", "yyyymm", pl.col("cfacshr").alias("cfacshr_mth"))
+
+
+def new_signals(out: pl.DataFrame, panel: pl.DataFrame, report: dict) -> None:
+    """
+    Description:
+        Checks of the columns added for the signal step (2026-11-12).
+    Steps:
+        1) Ranges: rmax1 >= rmax5; 0 < prc_highprc <= 1; finite values.
+        2) cfacshr_mth: a split must leave shares x factor unchanged, and the price
+           divided by the factor must move like the return without dividends.
+        3) Reference cases, computed apart from the raw daily rows.
+    Output:
+        Entries in the report; CheckError on a failure.
+    """
+    for c in ["rmax1_21d", "rmax5_21d", "cfacshr_mth"]:
+        check(out.filter(pl.col(c).is_not_null() & ~pl.col(c).is_finite()).height == 0, f"Non-finite {c}")
+    check(out.filter(pl.col("rmax1_21d").is_null() != pl.col("rmax5_21d").is_null()).height == 0,
+          "rmax1 and rmax5 do not exist together")
+    check(out.filter(pl.col("rmax5_21d") > pl.col("rmax1_21d") + 1e-12).height == 0,
+          "Mean of the five highest returns above the highest one")
+    check(out.filter(pl.col("rmax1_21d").is_null() != pl.col("rvol_21d").is_null()).height == 0,
+          "rmax1 and rvol_21d have different guards")
+    # JKP allows a last price of zero, so the ratio can be 0 (none is in our data).
+    check(out.filter((pl.col("prc_highprc_252d") < 0) | (pl.col("prc_highprc_252d") > 1 + 1e-12)).height == 0,
+          "Price to 12-month high outside [0, 1]")
+    report["prc_highprc_252d_equal_to_zero"] = out.filter(pl.col("prc_highprc_252d") == 0).height
+    check(out.filter(pl.col("rvolhl_21d").is_null() != pl.col("bidaskhl_21d").is_null()).height == 0,
+          "rvolhl_21d and bidaskhl_21d do not exist together")
+    check(out.filter(pl.col("cfacshr_mth") <= 0).height == 0, "Share factor not positive")
+
+    # Share factor against the monthly panel, on consecutive months of a stock.
+    j = (panel.select("permno", "yyyymm", "eligible", "prc", "retx", "shrout", "del_flag")
+         .join(out.select("permno", "yyyymm", "cfacshr_mth"), on=["permno", "yyyymm"], how="left")
+         .sort("permno", "yyyymm")
+         .with_columns(mi=pl.col("yyyymm") // 100 * 12 + pl.col("yyyymm") % 100))
+    prev = lambda c: pl.col(c).shift(1).over("permno")
+    j = j.with_columns(
+        consecutive=(pl.col("mi") - prev("mi")) == 1,
+        cf_prev=prev("cfacshr_mth"), prc_prev=prev("prc"), shr_prev=prev("shrout"),
+    ).filter(pl.col("consecutive") & (pl.col("del_flag") == "N") & (pl.col("yyyymm") >= SAMPLE_START)
+             & (pl.col("cfacshr_mth") > 0) & (pl.col("cf_prev") > 0)
+             & (pl.col("prc") > 0) & (pl.col("prc_prev") > 0) & pl.col("retx").is_not_null())
+    implied = (pl.col("prc") / pl.col("cfacshr_mth")) / (pl.col("prc_prev") / pl.col("cf_prev")) - 1
+    j = j.with_columns(gap=(implied - pl.col("retx")).abs(),
+                       changed=pl.col("cfacshr_mth") != pl.col("cf_prev"),
+                       # What the gap would be with no factor at all.
+                       gap_raw=((pl.col("prc") / pl.col("prc_prev") - 1) - pl.col("retx")).abs())
+    ch = j.filter(pl.col("changed"))
+    share = lambda g, c: g.filter(pl.col(c) <= 1e-3).height / g.height
+    report["cfacshr_mth"] = {
+        "known": int(out["cfacshr_mth"].is_not_null().sum()), "rows": out.height,
+        "months_compared": j.height, "share_adjusted_price_matches_retx": share(j, "gap"),
+        "months_with_a_factor_change": ch.height,
+        "of_which_adjusted_price_matches_retx": share(ch, "gap"),
+        "of_which_unadjusted_price_matches_retx": share(ch, "gap_raw"),
+    }
+    # The factor must explain the price moves of split months: with it, most split
+    # months match the return without dividends; without it, almost none do.
+    check(share(j, "gap") > 0.99, f"Adjusted prices do not follow retx: {report['cfacshr_mth']}")
+    check(share(ch, "gap") > 0.90 and share(ch, "gap_raw") < 0.10,
+          f"The share factor does not explain split months: {report['cfacshr_mth']}")
+    e = panel.filter(pl.col("eligible") & (pl.col("yyyymm") >= SAMPLE_START)).select(
+        "permno", "yyyymm").join(out, on=["permno", "yyyymm"], how="left")
+    report["coverage_new_columns_eligible_from_1963"] = {
+        c: round(e[c].is_not_null().mean(), 4)
+        for c in ["rmax1_21d", "rmax5_21d", "rvolhl_21d", "ami_126d", "dolvol_var_126d",
+                  "prc_highprc_252d", "cfacshr_mth"]}
+
+    # IBM (12490): 2-for-1 split in May 1999. The local factor halves (its level
+    # depends on the first daily row of the stock; only the ratio has a meaning).
+    ibm = out.filter((pl.col("permno") == 12490) & pl.col("yyyymm").is_in([199904, 199905])).sort("yyyymm")
+    check(ibm.height == 2 and abs(ibm["cfacshr_mth"][0] / ibm["cfacshr_mth"][1] - 2) < 1e-12,
+          f"Reference 12490 (split of May 1999) failed: {ibm['cfacshr_mth'].to_list()}")
+    # 12350: the CRSP factor is exported as zero from 2010 to 2024 (eleven later
+    # reverse splits), with no share event before May 2016: the local factor is 1.
+    z = out.filter((pl.col("permno") == 12350) & (pl.col("yyyymm") <= 201604))["cfacshr_mth"]
+    check(z.len() > 0 and z.null_count() == 0 and (z == 1.0).all(), "Reference 12350 (factor before 2016) failed")
+
+    # Reference cases. Those of 14593, 12490 and 10107 (2015) were computed apart
+    # from the raw daily rows, with a script that shares no code with this one;
+    # those of 37022, 10002, 10107 (2001) and 12350 were recomputed by the auditor
+    # from the raw daily CSV (audit of 2026-11-12).
+    seen = {}
+    for permno, yyyymm, column, expected, tol in REFERENCE_CASES:
+        got = out.filter((pl.col("permno") == permno) & (pl.col("yyyymm") == yyyymm))[column].to_list()
+        seen[f"{permno}_{yyyymm}_{column}"] = got
+        check(len(got) == 1 and got[0] is not None and abs(got[0] - expected) <= tol * max(1.0, abs(expected)),
+              f"Reference {permno} {yyyymm} {column} failed: {got}, expected {expected}")
+    report["reference_new_columns"] = seen
+
+
+REFERENCE_CASES = [
+    (12350, 201211, "prc_highprc_252d", 0.4462151394, 1e-9),
+    (12350, 201211, "rvolhl_21d", 0.0691384712, 1e-9),
+    (37022, 197812, "rmax1_21d", 0.016000, 1e-9), (37022, 197812, "rmax5_21d", 0.0110876, 1e-9),
+    (37022, 197812, "rvolhl_21d", 0.0090037613, 1e-9), (37022, 197812, "ami_126d", 3.2320529726, 1e-9),
+    (37022, 197812, "dolvol_var_126d", 2.2035250156, 1e-9),
+    (37022, 197812, "prc_highprc_252d", 0.9924242424, 1e-9),
+    (10002, 199404, "rmax1_21d", 0.060000, 1e-9), (10002, 199404, "rmax5_21d", 0.0466416, 1e-9),
+    (10002, 199404, "rvolhl_21d", 0.0015023953, 1e-9), (10002, 199404, "ami_126d", 13.1899783174, 1e-9),
+    (10002, 199404, "dolvol_var_126d", 2.9052004361, 1e-9),
+    (10002, 199404, "prc_highprc_252d", 0.8928571429, 1e-9),
+    (10107, 200103, "rmax1_21d", 0.078652, 1e-9), (10107, 200103, "rmax5_21d", 0.0486532, 1e-9),
+    (10107, 200103, "rvolhl_21d", 0.0260801364, 1e-9), (10107, 200103, "ami_126d", 0.0000193197798, 1e-9),
+    (10107, 200103, "dolvol_var_126d", 0.3954426771, 1e-9),
+    (10107, 200103, "prc_highprc_252d", 0.6017881706, 1e-9),
+    # Apple (14593), August 2020: 4-for-1 split on the last day of the month, the
+    # adjusted price ends the month at its 12-month high.
+    (14593, 202008, "rmax1_21d", 0.051532, 1e-9),
+    (14593, 202008, "rmax5_21d", 0.035753, 1e-9),
+    (14593, 202008, "ami_126d", 1.5167500297332397e-06, 1e-9),
+    (14593, 202008, "dolvol_var_126d", 0.45903242628845725, 1e-9),
+    (14593, 202008, "prc_highprc_252d", 1.0, 1e-9),
+    # IBM (12490), May 1999 (NYSE): split inside the 12-month window.
+    (12490, 199905, "rmax1_21d", 0.090909, 1e-9),
+    (12490, 199905, "rmax5_21d", 0.0464482, 1e-9),
+    (12490, 199905, "ami_126d", 1.9902019765966455e-05, 1e-9),
+    (12490, 199905, "dolvol_var_126d", 0.5595022563201937, 1e-9),
+    (12490, 199905, "prc_highprc_252d", 0.943089430894309, 1e-9),
+    # Microsoft (10107), March 2015: no split in the window.
+    (10107, 201503, "rmax1_21d", 0.019307, 1e-9),
+    (10107, 201503, "rmax5_21d", 0.0116144, 1e-9),
+    (10107, 201503, "ami_126d", 6.52933729593014e-06, 1e-9),
+    (10107, 201503, "dolvol_var_126d", 0.44688720690071526, 1e-9),
+    (10107, 201503, "prc_highprc_252d", 0.8194920378955856, 1e-9),
+]
+
+
+def vintage_test(raw: pl.DataFrame, events: pl.DataFrame, ff: pl.DataFrame, sec: pl.DataFrame,
+                 known: list[int], report: dict) -> None:
+    """
+    Description:
+        Later vintages of the CRSP file, simulated on a sample: the levels of the
+        cumulative share factor are divided by 1e7 (many fall below the precision
+        limit) or by 1e13 (most are rounded to exactly zero, so that only the
+        dated events are left), and rounded to 12 decimals.
+    Steps:
+        1) Local factor from the true levels and from the simulated ones.
+        2) The columns that use the factor (high-low spread and volatility, price
+           to the 12-month high) are rebuilt from both.
+        3) Regular stocks: same missing values everywhere, every local factor
+           within 1e-4, every column within 1e-3. A failure stops the script.
+        4) The stocks of `known` have a change of the CRSP factor that the dated
+           events do not give (see MAX_UNMATCHED_FACTOR_CHANGES). A later vintage
+           can change their local factor: the effect is measured and reported, it
+           is a declared limit.
+    Output:
+        Entry "vintage_test" in the report; CheckError on a failure.
+    """
+    cols = ["bidaskhl_21d", "rvolhl_21d", "prc_highprc_252d", "n_hl_observed_21d"]
+
+    def build(frame: pl.DataFrame) -> tuple[pl.DataFrame, pl.DataFrame, dict]:
+        tmp = {k: 0 for k in COUNTS}
+        f = local_share_factor(frame, events, tmp)
+        stats = window_stats(month_sums(prepare_batch(f, ff, sec, tmp))).select("permno", "yyyymm", *cols)
+        return f.select("permno", "date", "cfacshr"), stats, tmp
+
+    fa, sa, _ = build(raw)
+    is_known = pl.col("permno").is_in(known)
+    res = {}
+    for name, scale in [("divided_by_1e7", 1e-7), ("divided_by_1e13", 1e-13)]:
+        fb, sb, tmp2 = build(raw.with_columns((pl.col("cfacshr") * scale).round(12)))
+        j = fa.join(fb.rename({"cfacshr": "sim"}), on=["permno", "date"])
+        j = j.with_columns(null_diff=pl.col("cfacshr").is_null() != pl.col("sim").is_null(),
+                           gap=(pl.col("sim") / pl.col("cfacshr") - 1).abs())
+        k = sa.join(sb, on=["permno", "yyyymm"], suffix="_sim")
+        check(j.height == fa.height and k.height == sa.height, "The vintage test lost rows")
+
+        def summary(jj: pl.DataFrame, kk: pl.DataFrame) -> dict:
+            stocks = jj.group_by("permno").agg(worst=pl.col("gap").max())
+            out = {"stocks": stocks.height, "rows": jj.height,
+                   "factor_null_mismatch": jj.filter(pl.col("null_diff")).height,
+                   "factor_stocks_within_1e-4": stocks.filter(pl.col("worst").fill_null(0) <= 1e-4).height,
+                   "factor_max_gap": jj["gap"].max()}
+            for c in cols:
+                # Floats on both sides (one column is a count of days).
+                a, b = pl.col(c).cast(pl.Float64), pl.col(f"{c}_sim").cast(pl.Float64)
+                rel = (a - b).abs() / a.abs().clip(lower_bound=1e-12)
+                out[c] = {"null_mismatch": kk.filter(a.is_null() != b.is_null()).height,
+                          "values_moved_by_more_than_1e-3": kk.filter(rel > 1e-3).height,
+                          "max_rel_gap": kk.select(rel.max()).item()}
+            return out
+
+        regular = summary(j.filter(~is_known), k.filter(~is_known))
+        res[name] = {
+            "simulated_rows_below_min_level": tmp2["factor_rows_below_min_level"],
+            "simulated_rows_exactly_zero": tmp2["factor_rows_exactly_zero"],
+            "steps_taken_from_events": tmp2["factor_steps_from_events"],
+            "regular_stocks": regular,
+            "stocks_with_an_unexplained_factor_change": summary(j.filter(is_known), k.filter(is_known)),
+        }
+        check(regular["factor_null_mismatch"] == 0, f"A later vintage ({name}) changes which factors are missing")
+        check(regular["factor_stocks_within_1e-4"] == regular["stocks"],
+              f"The local factor depends on the vintage ({name}): {regular}")
+        for c in cols:
+            check(regular[c]["null_mismatch"] == 0 and regular[c]["values_moved_by_more_than_1e-3"] == 0,
+                  f"{c} depends on the vintage ({name}): {regular[c]}")
+    check(res["divided_by_1e13"]["simulated_rows_exactly_zero"] > 0, "The extreme vintage simulates no zero")
+    report["vintage_test"] = res
+
+
+COUNTS = ["rows", "exact_duplicate_rows", "factor_rows_below_min_level", "factor_rows_exactly_zero",
+          "factor_steps_from_events", "factor_stocks_using_events",
+          "factor_changes_between_precise_levels", "precise_changes_not_matched_by_events",
+          "delisting_rows_dropped", "returns_dropped_after_long_gap",
           "returns_after_row_gap_over_14d", "returns_without_previous_price",
           "rows_without_market_return", "rows_with_unknown_exchange"]
 
@@ -541,11 +972,14 @@ def checks(out: pl.DataFrame, panel: pl.DataFrame, report: dict) -> None:
     # Only data of month t or before: the last daily date used is inside the month.
     check(out.filter((pl.col("last_date").dt.year() * 100 + pl.col("last_date").dt.month())
                      != pl.col("yyyymm")).height == 0, "A daily date outside its month")
-    for c in ["rvol_21d", "rvol_252d", "dolvol_21d", "dolvol_126d", "spread_quoted_21d", "bidaskhl_21d"]:
+    for c in ["rvol_21d", "rvol_252d", "dolvol_21d", "dolvol_126d", "spread_quoted_21d", "bidaskhl_21d",
+              "rvolhl_21d", "ami_126d", "dolvol_var_126d", "prc_highprc_252d"]:
         check(out.filter(pl.col(c) < 0).height == 0, f"Negative {c}")
         check(out.filter(pl.col(c).is_not_null() & ~pl.col(c).is_finite()).height == 0, f"Non-finite {c}")
     check(out.filter(pl.col("beta_252d").is_not_null() & ~pl.col("beta_252d").is_finite()).height == 0,
           "Non-finite beta")
+
+    new_signals(out, panel, report)
 
     # First-day return: a real return, and consistent with the month. On months
     # with a return every day, (1 + ret_d1) x (rest of the month) = the compounded
@@ -690,23 +1124,35 @@ def main() -> None:
 
     # Exchange history, to apply the NASDAQ volume adjustment day by day.
     sec = read_exchange_history(report)
+    events = read_share_events(report)
 
     permnos = pl.scan_parquet(DAILY_MIN).select("permno").unique().collect()["permno"].sort()
     report["daily_stocks"] = permnos.len()
     counts = {k: 0 for k in COUNTS}
-    parts = []
+    counts["_unmatched"] = []
+    parts, factors = [], []
+    panel_keys = panel.select("permno", "date", "yyyymm")
     step = -(-permnos.len() // N_BATCHES)
     for i in range(0, permnos.len(), step):
         lo, hi = permnos[i], permnos[min(i + step, permnos.len()) - 1]
         d = pl.scan_parquet(DAILY_MIN).filter(pl.col("permno").is_between(lo, hi)).collect()
+        d = local_share_factor(d, events, counts)
+        factors.append(month_factor(d, panel_keys))
         parts.append(month_sums(prepare_batch(d, ff, sec, counts)))
+    report["unexplained_factor_changes"] = counts.pop("_unmatched")
     report["daily_counts"] = counts
+    check(counts["precise_changes_not_matched_by_events"] <= MAX_UNMATCHED_FACTOR_CHANGES,
+          f"{counts['precise_changes_not_matched_by_events']} changes of the CRSP share factor are not "
+          f"explained by the dated events (at most {MAX_UNMATCHED_FACTOR_CHANGES} known cases)")
     sums = pl.concat(parts)
     check(sums.select("permno", "ym").is_unique().all(), "A stock-month in two batches")
     out = window_stats(sums)
+    n_out = out.height
+    out = out.join(pl.concat(factors), on=["permno", "yyyymm"], how="left")
+    check(out.height == n_out, "The share factor join changed the row count")
     report["rows"] = out.height
 
-    check_direct(out, ff, sec, report)
+    check_direct(out, ff, sec, events, report)
     checks(out, panel, report)
     out = out.drop("ret_cmp", "n_ret_raw", "n_long_gap", "s_vol", "s_vol_adj", "n_nasdaq_days",
                    "n_exch_days")

@@ -87,8 +87,15 @@ crsp_daily_agg,dolvol_126d,"Mean daily dollar volume, 6 months to t",USD,step 9,
 crsp_daily_agg,n_spread_21d,Days with a valid quote in month t,count,step 9,t,audit
 crsp_daily_agg,spread_quoted_21d,"Mean quoted spread over the midpoint, month t",decimal,step 9,t,execution_cost
 crsp_daily_agg,n_spread_hl_21d,Days with a high-low spread in month t,count,step 9,t,audit
-crsp_daily_agg,bidaskhl_21d,"Mean high-low (Corwin-Schultz) spread, month t",decimal,step 9,t,execution_cost
+crsp_daily_agg,bidaskhl_21d,"Mean high-low (Corwin-Schultz) spread, month t",decimal,step 9,t,predictor;execution_cost
 crsp_daily_agg,n_hl_observed_21d,Days of month t with an observed high-low range accepted by the estimator (0 = the high-low spread rests only on carried ranges),count,step 9,t,execution_cost;audit
+crsp_daily_agg,rvolhl_21d,"Mean high-low (Corwin-Schultz) volatility, month t",decimal per day,step 9,t,predictor
+crsp_daily_agg,rmax1_21d,Highest daily return of month t,decimal,step 9,t,predictor
+crsp_daily_agg,rmax5_21d,Mean of the five highest daily returns of month t,decimal,step 9,t,predictor
+crsp_daily_agg,ami_126d,"Amihud illiquidity: mean of |daily return| / daily dollar volume, times one million, 6 months to t",1e-6 per USD,step 9,t,predictor
+crsp_daily_agg,dolvol_var_126d,"Standard deviation over mean of the daily dollar volume, 6 months to t",number,step 9,t,predictor
+crsp_daily_agg,prc_highprc_252d,"Last split-adjusted price over the highest one, 12 months to t",ratio,step 9,t,predictor
+crsp_daily_agg,cfacshr_mth,"Local cumulative share factor on the date of the monthly CRSP row: 1 on the first daily row of the stock, then divided by the share multiplier of each split or stock dividend up to the date. Built from the ratios of the CRSP factor (DlyCumFacShr) where its exported level is precise, from the dated share events (type FRS) otherwise; only past events enter. Missing when the daily file has no row that day (it starts in 1960). Only to be used as a ratio between two dates of the same stock, inside chcsho_* and div*_me: never rank it, never use its level or its missing flag",factor,CRSP,t,transform_input
 compustat_annual,gvkey,Compustat firm key,id,Compustat,key,identifier
 compustat_annual,datadate,Fiscal year end,date,Compustat,key,identifier
 compustat_annual,fyear,Fiscal year,year,Compustat,acc_6m,identifier

@@ -26,9 +26,12 @@ from utils import PROCESSED, PROJECT, CheckError, check
 DICTIONARY = PROJECT / "resources" / "data_dictionary.csv"
 AVAILABILITY = {"key", "t", "interval", "acc_6m", "t+1", "after_t", "today"}
 ROLES = {"identifier", "universe", "predictor", "outcome", "benchmark", "execution_cost",
-         "weight", "audit"}
+         "weight", "audit", "transform_input"}
+# "transform_input": never a predictor by itself (its level, its rank or its
+# missing flag must not be used); only inside the transformations named in its
+# description.
 # Roles that feed a decision at the end of month t.
-DECISION_ROLES = {"universe", "predictor", "execution_cost", "weight"}
+DECISION_ROLES = {"universe", "predictor", "execution_cost", "weight", "transform_input"}
 USABLE_AT_T = {"key", "t", "interval", "acc_6m"}
 # The tables the dictionary must describe: a missing table is an error too.
 TABLES = {"crsp_panel_acc", "crsp_daily_agg", "compustat_annual", "ff_factors_monthly",
